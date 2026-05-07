@@ -29,6 +29,7 @@ yarn install
 bash scripts/vendor.sh         # clones bkomuves/hash-circuits + integritychain/fips205 at pinned SHAs
 yarn bench                     # compiles every circuit in circuits.json + dumps r1cs info to results/raw_bench.txt
 yarn parse                     # generates results/results_summary.md
+bash scripts/run_tests.sh      # 20 per-primitive correctness tests (Rust oracle ↔ circom)
 cat results/results.md         # detailed report with all three per-family tables
 ```
 
@@ -50,11 +51,17 @@ cat results/results.md         # detailed report with all three per-family table
   hardware (no code changes); (2) deeper circuit-level optimizations
   (specialized SHA-256 by length, shared ADRS encoding, smarter
   multiplexers — stacking these may bring SHA-2 to ~108M, still tight).
-- **Witness oracle** (positive + negative test) pending — requires Rust
-  reference using `vendor/fips205::keygen_with_seeds` for SHA-2/SHAKE
-  KATs (the ACVP `internalProjection.json` shipped with `fips205@30bac08`
-  doesn't include 128s vectors). Poseidon needs a from-scratch shadow
-  impl since no library does Poseidon-SLH-DSA over secq256r1.
+- **Per-primitive Rust oracle** (`reference/src/main.rs`) computes
+  FIPS 205 §11.2.2 / §11.1 reference outputs for SHA-2 and SHAKE
+  primitives, emits circom witness JSONs with expected outputs, and
+  test wrapper circuits assert `out === expected_out`. **All 20 tests
+  pass** (10 positive: circuit output matches Rust; 10 negative:
+  flipped expected_out causes witness gen to fail on the assertion).
+  See `scripts/run_tests.sh` and `results/results.md` "Cryptographic
+  correctness" section.
+- **End-to-end main-level witness check** still pending: SHA-2 and
+  SHAKE mains OOM, and Poseidon needs a from-scratch shadow impl
+  since no library does Poseidon-SLH-DSA over secq256r1.
 
 ## Documented spec decisions
 
@@ -106,8 +113,10 @@ circuits/
   poseidon/      poseidon_wrap + hashes (uses common/wots etc.)
   main_<family>.circom       top-level mains
   bench/                     per-primitive standalone benches
-reference/                   Rust oracle (vendor/fips205) — pending
-scripts/                     vendor.sh, bench.sh, parse_r1cs_stats.py
-results/                     final tables + raw_bench.txt
+  test/                      Rust-oracle assertion wrappers (test_<family>_<prim>)
+reference/                   Rust oracle: FIPS 205 §11.1/§11.2.2 hashers
+                             + circom witness JSON emitter
+scripts/                     vendor.sh, bench.sh, parse_r1cs_stats.py, run_tests.sh
+results/                     final tables + raw_bench.txt + soundness_audit.md
 vendor/                      git-cloned at pinned SHAs
 ```
