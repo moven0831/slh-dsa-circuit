@@ -23,6 +23,10 @@ reference/target/
 # Local results raw output (the polished results.md is committed)
 results/raw_bench.txt
 
+# Auto-generated test inputs (regenerate via cargo run --manifest-path reference/Cargo.toml -- all all)
+inputs/
+kat/inputs/
+
 # OS / editor
 .DS_Store
 .idea/

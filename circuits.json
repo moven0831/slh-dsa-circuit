@@ -102,6 +102,56 @@
     "template": "BenchAdrsSanity",
     "params": []
   },
+  "test_sha2_F": {
+    "file": "test/test_sha2_F",
+    "template": "TestSha2F",
+    "params": []
+  },
+  "test_sha2_H": {
+    "file": "test/test_sha2_H",
+    "template": "TestSha2H",
+    "params": []
+  },
+  "test_sha2_Tk": {
+    "file": "test/test_sha2_Tk",
+    "template": "TestSha2Tk",
+    "params": []
+  },
+  "test_sha2_Tlen": {
+    "file": "test/test_sha2_Tlen",
+    "template": "TestSha2Tlen",
+    "params": []
+  },
+  "test_sha2_HMsg": {
+    "file": "test/test_sha2_HMsg",
+    "template": "TestSha2HMsg",
+    "params": []
+  },
+  "test_shake_F": {
+    "file": "test/test_shake_F",
+    "template": "TestShakeF",
+    "params": []
+  },
+  "test_shake_H": {
+    "file": "test/test_shake_H",
+    "template": "TestShakeH",
+    "params": []
+  },
+  "test_shake_Tk": {
+    "file": "test/test_shake_Tk",
+    "template": "TestShakeTk",
+    "params": []
+  },
+  "test_shake_Tlen": {
+    "file": "test/test_shake_Tlen",
+    "template": "TestShakeTlen",
+    "params": []
+  },
+  "test_shake_HMsg": {
+    "file": "test/test_shake_HMsg",
+    "template": "TestShakeHMsg",
+    "params": []
+  },
   "bench_sha2_wots": {
     "file": "bench/bench_sha2_wots",
     "template": "BenchSha2Wots",
