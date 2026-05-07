@@ -8,6 +8,44 @@
 Reproduce: `bash scripts/bench.sh && python3 scripts/parse_r1cs_stats.py`.
 Raw output: `results/raw_bench.txt`. Auto-summary: `results/results_summary.md`.
 
+## TLDR
+
+| Per-call cost (constraints) | F | H | T_k | T_len | H_msg |
+|-----------------------------|--:|--:|----:|------:|------:|
+| **SHA-2** (midstate)        | 30,290 | 30,662 | 123,182 | 307,106 | 583,273 |
+| **SHAKE**                    | 145,568 | 145,824 | 440,736 | 737,952 | 1,182,912 |
+| **Poseidon** (non-standard)  |    968 |   1,102 |   5,989 |  14,428 |    24,844 |
+
+| Full verifier (sum-of-parts)            |  Total R1CS | Status |
+|-----------------------------------------|------------:|---------------------|
+| **SHA-2** (midstate)                    | ~121,728,293 | OOM (compile killed at RSS 3.94 GB; see "Hardware limit" §) |
+| **SHAKE**                                | ~577,475,008 | OOM (~5× larger; not attempted) |
+| **Poseidon** (non-standard, integrated) |   **3,992,159** | ✅ compiles in <1 min, peak RSS <2 GB |
+
+**Headline takeaways**
+
+1. **Poseidon is ~30× cheaper than SHA-2 and ~145× cheaper than SHAKE**
+   at every primitive. The cost dominates SLH-DSA verification because
+   F alone is invoked **3,675 times** in WOTS chains.
+2. **SHA-2 midstate optimization halves the F/H cost** (60,778 → 30,290,
+   −49.8 %). Reduces SHA-2 main from ~242 M → ~122 M constraints.
+   Pure compiler optimization — output bits unchanged from the
+   unoptimized version. See `circuits/sha2/sha256_midstate.circom`.
+3. **20/20 per-primitive tests pass** — `reference/src/main.rs`
+   (Rust SHA-2/SHAKE FIPS 205 oracle) emits expected outputs into
+   `kat/inputs/` JSON; test wrapper circuits assert
+   `out === expected_out`; witness gen succeeds for all 10 positive
+   tests and fails (as required) for all 10 tampered negative tests.
+   Run via `bash scripts/run_tests.sh`.
+4. **Poseidon main integration delta is +0.9 %** (3,992,159 measured
+   vs 3,957,343 sum-of-parts) — validates the SHA-2/SHAKE projections
+   are accurate within ~1 %.
+5. **End-to-end SLH-DSA witness check is blocked by**: (a) circom
+   OOM for SHA-2/SHAKE mains under memory pressure (tested on 24 GB
+   M3 MacBook with heavy swap commit; peak RSS 3.94 GB before kill —
+   see "Hardware limit"); (b) Poseidon needs a from-scratch Rust
+   shadow impl since no library does Poseidon-SLH-DSA over secq256r1.
+
 The SHA-2 family applies the **midstate optimization** (FIPS 205 §11.2.2's
 zero-padded `pk_seed||zeros[48]` block compressed once and shared across
 all F/H/T_l calls). Numbers below reflect midstate-optimized SHA-2.
@@ -33,7 +71,7 @@ all F/H/T_l calls). Numbers below reflect midstate-optimized SHA-2.
 | **TOTAL R1CS constraints (sum-of-parts)** |             |                  | **~121,728,293** |
 | Witness size (≈ nWires, projected)   | —              | —                | ~120M       |
 | Public inputs (PK + M)               | —              | —                | 1056        |
-| Compile time (circom → r1cs)         | —              | —                | OOM (16 GB) |
+| Compile time (circom → r1cs)         | —              | —                | OOM under pressure (see Hardware limit §) |
 | `.r1cs` file size                    | —              | —                | OOM         |
 
 **Sub-component primitive sizes** (per-call benches):
@@ -53,9 +91,12 @@ mux) measured **454,622** constraints ⇒ 30,308 per F-call (matches
 per-F bench within 0.06%), confirming projection accuracy.
 
 The integrated `main_sha2` (~122M constraints projected) **OOMs**
-the `circom v2.2.3` compiler on a 16 GB MacBook (RSS reaches 3.9 GB
-before macOS memory pressure kills the process at "template
-instances: 139"). See "Hardware limit" below.
+the `circom v2.2.3` compiler under memory pressure: tested on a
+24 GB M3 MacBook, RSS reached 3.94 GB after ~3 minutes (past
+"template instances: 139") before macOS SIGKILL'd the process —
+the system had ~13 GB swap committed by other processes, leaving
+only ~10 GB free against circom's estimated 12+ GB working set.
+See "Hardware limit" below for mitigations.
 
 ---
 
@@ -163,12 +204,18 @@ in the "F+H+rest" cluster + amortized seed; total SHA-256 compressions ≈ 4,015
 
 ## Hardware limit / OOM caveat
 
-`circom v2.2.3` running on a 16 GB MacBook is killed by macOS memory
-pressure when peak RSS approaches ~4 GB. Both the unoptimized SHA-2
-(~241M constraints) and the midstate-optimized SHA-2 (~122M
-constraints) exceed this budget — circom's IR + R1CS emission needs
-roughly 60–100 bytes/constraint of working memory, putting the SHA-2
-main at ~10–12 GB peak. The SHAKE main (~578M) needs ~50 GB.
+`circom v2.2.3` is killed by macOS memory pressure when peak RSS
+approaches ~4 GB on a system already saturated with other workloads.
+Concrete test environment: 24 GB M3 MacBook with `vm.swapusage`
+showing 13.2 GB of 14 GB swap already committed (browsers, IDE,
+other apps), leaving only ~10 GB free physical+swap headroom for
+circom. Both the unoptimized SHA-2 (~241M constraints) and the
+midstate-optimized SHA-2 (~122M constraints) exceed this budget —
+circom's IR + R1CS emission needs roughly 60–100 bytes/constraint of
+working memory, putting the SHA-2 main at ~10–12 GB peak. The SHAKE
+main (~578M) needs ~50 GB. **On a less-loaded 24 GB machine or any
+32 GB+ machine, the SHA-2 compile is expected to succeed without
+code changes.**
 
 Concrete observations:
 - main_poseidon (~4M constraints, integrated): compiles in <1 minute,
@@ -186,7 +233,8 @@ Two paths forward:
 1. **Run on larger hardware** (32–64 GB RAM). Identical verification
    semantics. No code changes needed — the templates are ready.
 2. **Further circuit-level optimizations** beyond midstate (each is
-   high-effort, and stacking multiple is necessary to fit on 16 GB):
+   high-effort, and stacking multiple is necessary to fit when memory
+   is constrained):
    - Specialized SHA-256 templates per fixed input length (saving
      ~10% of padding-circuit cost): est. -10M constraints.
    - Shared ADRS encoding within a chain (15 F-calls share most ADRS

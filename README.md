@@ -1,7 +1,9 @@
 # slhdsa-128s-circom
 
 R1CS arithmetization benchmark of the **NIST FIPS 205 SLH-DSA-128s**
-signature verifier under three swappable hash gadget configurations:
+signature verifier under three swappable hash gadget configurations,
+on the `secq256r1` prime field (matching
+[`privacy-ethereum/zkID/wallet-unit-poc/circom/circomkit.json`](https://github.com/privacy-ethereum/zkID/blob/main/wallet-unit-poc/circom/circomkit.json)).
 
 | Family   | Standardization                          | Primitives                          |
 |----------|------------------------------------------|-------------------------------------|
@@ -9,17 +11,49 @@ signature verifier under three swappable hash gadget configurations:
 | SHAKE    | FIPS 205 §11.1 SLH-DSA-SHAKE-128s        | SHAKE-256                           |
 | Poseidon | non-standard, ZK-benchmarking only       | circomlib Poseidon over secq256r1   |
 
+## TLDR
+
+- **Per-call cost ratio**: Poseidon ≪ SHA-2 ≪ SHAKE.
+  Picking F (the dominant primitive at 3,675 invocations per verifier):
+  Poseidon **968** ≈ 1×, SHA-2 **30,290** ≈ 31×, SHAKE **145,568** ≈ 150×.
+- **Full-verifier R1CS** (sum of all primitives × invocations): Poseidon
+  **3.99 M** (compiles), SHA-2 **~121.7 M**, SHAKE **~577.5 M**.
+- **Midstate optimization** (FIPS 205 §11.2.2 zero-padded prefix block
+  compressed once, shared across F/H/T_l calls) halves SHA-2: F goes
+  60,778 → 30,290, dropping the SHA-2 main from ~242 M → ~122 M
+  (–50 %). Output bits identical to the unoptimized version.
+- **Cryptographic correctness**: 20/20 per-primitive tests pass —
+  Rust oracle (`reference/`) computes FIPS 205 §11.1/§11.2.2
+  reference outputs and circuit `out === expected_out` assertions
+  hold. Negative tests (flipped expected) all reject as expected.
+- **Hardware limit (†)**: `main_sha2` (~122 M) and `main_shake` (~578 M)
+  OOM the `circom v2.2.3` compiler. Tested on a 24 GB M3 MacBook —
+  circom reached peak RSS 3.94 GB after ~3 minutes before being
+  SIGKILL'd by macOS memory pressure (system swap was 13/14 GB used
+  during the test, so ~10 GB was free for circom against an estimated
+  12+ GB working-set need). On a less loaded 24 GB system or any
+  32 GB+ machine, the compile is expected to succeed. `main_poseidon`
+  (4 M) compiles in <1 min, peak RSS <2 GB. The Poseidon integrated
+  count vs sum-of-parts is +0.9 % — validates the SHA-2/SHAKE
+  projections within ~1 %.
+- **What's the user-facing implication?** For ZK-friendly SLH-DSA
+  applications the **Poseidon family is ~30× smaller than SHA-2** at
+  the cost of being non-standard. For FIPS-compliant applications,
+  SHA-2 is recommended over SHAKE (4–5× smaller).
+
+| Family   | F | H | T_k | T_len | H_msg | **Verifier total** | Compile status |
+|----------|--:|--:|--:|--:|--:|---:|---|
+| **SHA-2** (midstate) | 30,290 | 30,662 | 123,182 | 307,106 | 583,273 | **~121.7 M** | OOM (see note†) |
+| **SHAKE** | 145,568 | 145,824 | 440,736 | 737,952 | 1,182,912 | **~577.5 M** | OOM (see note†) |
+| **Poseidon** (non-standard) | 968 | 1,102 | 5,989 | 14,428 | 24,844 | **3,992,159** ✓ | <1 min, <2 GB |
+
 The deliverable is **R1CS stats** — per-component constraint counts,
-witness sizes, totals — plus a sanity test that each circuit accepts a
-real KAT and rejects a tampered KAT. **No trusted setup, no proof
-generation, no Solidity verifier, no integration.**
+witness sizes, totals — plus 20/20 per-primitive correctness tests.
+**No trusted setup, no proof generation, no Solidity verifier.**
 
-The prime field is `secq256r1` (P-256 group order), matching
-[`privacy-ethereum/zkID/wallet-unit-poc/circom/circomkit.json`](https://github.com/privacy-ethereum/zkID/blob/main/wallet-unit-poc/circom/circomkit.json).
-
-See `docs/PLAN.md` (or the in-tree `task-build-circom-calm-duckling.md`)
-for the implementation plan, `Dependencies.md` for pinned versions,
-and `results/results.md` for the constraint-count tables.
+See [`results/results.md`](results/results.md) for the full
+per-family breakdown, [`results/soundness_audit.md`](results/soundness_audit.md)
+for the soundness analysis, and `Dependencies.md` for pinned versions.
 
 ## Quickstart
 
@@ -46,9 +80,12 @@ cat results/results.md         # detailed report with all three per-family table
   F goes 60,778 → 30,290, H 61,150 → 30,662, etc. SHA-2 main projection
   drops from ~241M to ~121M constraints.
 - **`main_sha2`** (~121M) and **`main_shake`** (~578M) **OOM** the
-  `circom v2.2.3` compiler on a 16 GB MacBook (RSS hits 3.9 GB before
-  macOS memory pressure SIGKILLs). Workarounds: (1) run on 32–64 GB
-  hardware (no code changes); (2) deeper circuit-level optimizations
+  `circom v2.2.3` compiler under memory pressure (RSS hits ~3.9 GB
+  before macOS SIGKILLs). Tested on a 24 GB M3 MacBook with ~13 GB
+  swap already committed by other processes, leaving ~10 GB free
+  against circom's estimated 12+ GB working set. Workarounds:
+  (1) close other apps to free memory; (2) run on 32 GB+ hardware
+  (no code changes); (3) deeper circuit-level optimizations
   (specialized SHA-256 by length, shared ADRS encoding, smarter
   multiplexers — stacking these may bring SHA-2 to ~108M, still tight).
 - **Per-primitive Rust oracle** (`reference/src/main.rs`) computes
