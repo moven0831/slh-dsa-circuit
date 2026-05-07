@@ -1,0 +1,11 @@
+{
+  "version": "2.2.3",
+  "protocol": "groth16",
+  "prime": "secq256r1",
+  "optimization": 2,
+  "cWitness": false,
+  "include": [
+    "node_modules",
+    "vendor/hash-circuits/circuits"
+  ]
+}

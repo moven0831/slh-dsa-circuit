@@ -1,0 +1,26 @@
+{
+  "name": "slhdsa-128s-circom",
+  "private": true,
+  "version": "0.1.0",
+  "description": "R1CS arithmetization benchmark of SLH-DSA-128s under SHA-2 / SHAKE / Poseidon hash gadgets, on the secq256r1 prime field",
+  "license": "MIT",
+  "packageManager": "yarn@4.13.0",
+  "scripts": {
+    "vendor": "bash scripts/vendor.sh",
+    "bench": "bash scripts/bench.sh",
+    "parse": "python3 scripts/parse_r1cs_stats.py",
+    "witness": "bash scripts/gen_witness.sh",
+    "negative": "bash scripts/negative_test.sh",
+    "compile:sha2": "circomkit compile main_sha2",
+    "compile:shake": "circomkit compile main_shake",
+    "compile:poseidon": "circomkit compile main_poseidon",
+    "compile:all": "yarn compile:sha2 && yarn compile:shake && yarn compile:poseidon"
+  },
+  "dependencies": {
+    "circomkit": "^0.3.4",
+    "circomlib": "^2.0.5"
+  },
+  "resolutions": {
+    "snarkjs": "0.7.6"
+  }
+}

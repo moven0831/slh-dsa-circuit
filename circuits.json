@@ -1,0 +1,130 @@
+{
+  "main_sha2": {
+    "file": "main_sha2",
+    "template": "MainSha2",
+    "params": [],
+    "pubs": ["pk", "msg"]
+  },
+  "main_shake": {
+    "file": "main_shake",
+    "template": "MainShake",
+    "params": [],
+    "pubs": ["pk", "msg"]
+  },
+  "main_poseidon": {
+    "file": "main_poseidon",
+    "template": "MainPoseidon",
+    "params": [],
+    "pubs": ["pk", "msg"]
+  },
+  "bench_sha2_F": {
+    "file": "bench/bench_sha2_F",
+    "template": "BenchSha2F",
+    "params": []
+  },
+  "bench_sha2_H": {
+    "file": "bench/bench_sha2_H",
+    "template": "BenchSha2H",
+    "params": []
+  },
+  "bench_sha2_Tk": {
+    "file": "bench/bench_sha2_Tk",
+    "template": "BenchSha2Tk",
+    "params": []
+  },
+  "bench_sha2_Tlen": {
+    "file": "bench/bench_sha2_Tlen",
+    "template": "BenchSha2Tlen",
+    "params": []
+  },
+  "bench_sha2_HMsg": {
+    "file": "bench/bench_sha2_HMsg",
+    "template": "BenchSha2HMsg",
+    "params": []
+  },
+  "bench_sha2_seed_iv": {
+    "file": "bench/bench_sha2_seed_iv",
+    "template": "BenchSha2SeedIv",
+    "params": []
+  },
+  "bench_shake_F": {
+    "file": "bench/bench_shake_F",
+    "template": "BenchShakeF",
+    "params": []
+  },
+  "bench_shake_H": {
+    "file": "bench/bench_shake_H",
+    "template": "BenchShakeH",
+    "params": []
+  },
+  "bench_shake_Tk": {
+    "file": "bench/bench_shake_Tk",
+    "template": "BenchShakeTk",
+    "params": []
+  },
+  "bench_shake_Tlen": {
+    "file": "bench/bench_shake_Tlen",
+    "template": "BenchShakeTlen",
+    "params": []
+  },
+  "bench_shake_HMsg": {
+    "file": "bench/bench_shake_HMsg",
+    "template": "BenchShakeHMsg",
+    "params": []
+  },
+  "bench_poseidon_F": {
+    "file": "bench/bench_poseidon_F",
+    "template": "BenchPoseidonF",
+    "params": []
+  },
+  "bench_poseidon_H": {
+    "file": "bench/bench_poseidon_H",
+    "template": "BenchPoseidonH",
+    "params": []
+  },
+  "bench_poseidon_Tk": {
+    "file": "bench/bench_poseidon_Tk",
+    "template": "BenchPoseidonTk",
+    "params": []
+  },
+  "bench_poseidon_Tlen": {
+    "file": "bench/bench_poseidon_Tlen",
+    "template": "BenchPoseidonTlen",
+    "params": []
+  },
+  "bench_poseidon_HMsg": {
+    "file": "bench/bench_poseidon_HMsg",
+    "template": "BenchPoseidonHMsg",
+    "params": []
+  },
+  "bench_adrs_sanity": {
+    "file": "bench/bench_adrs_sanity",
+    "template": "BenchAdrsSanity",
+    "params": []
+  },
+  "bench_sha2_wots": {
+    "file": "bench/bench_sha2_wots",
+    "template": "BenchSha2Wots",
+    "params": []
+  },
+  "bench_sha2_wots_one_chain": {
+    "file": "bench/bench_sha2_wots_one_chain",
+    "template": "BenchSha2WotsOneChain",
+    "params": []
+  },
+  "bench_sha2_fors": {
+    "file": "bench/bench_sha2_fors",
+    "template": "BenchSha2Fors",
+    "params": []
+  },
+  "bench_sha2_xmss": {
+    "file": "bench/bench_sha2_xmss",
+    "template": "BenchSha2Xmss",
+    "params": []
+  },
+  "bench_sha2_ht": {
+    "file": "bench/bench_sha2_ht",
+    "template": "BenchSha2Ht",
+    "params": []
+  }
+}
