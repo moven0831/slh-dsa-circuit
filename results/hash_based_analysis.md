@@ -412,23 +412,34 @@ variants (see §6).
 
 ### 3.1 Block counts side by side
 
-| Scheme | NIST level | sigs (capacity) | hash calls | total SHA-256 blocks | R1CS (M) |
-|---|--:|--:|--:|--:|--:|
-| LMS_M24_H10/W4    | 3 | 1 K   |    819 |   822 |  25 |
-| LMS_M32_H10/W4    | 5 | 1 K   |  1,017 | 1,076 |  33 |
-| LMS_M32_H15/W4    | 5 | 32 K  |  1,022 | 1,086 |  33 |
-| LMS_M32_H20/W4    | 5 | 1 M   |  1,027 | 1,096 |  34 |
-| HSS L=2 (H10/W4)  | 5 | 1 M   |  2,034 | 2,152 |  66 |
-| HSS L=2 (H15/W4)  | 5 | 1 B   |  2,044 | 2,172 |  67 |
-| HSS L=2 (H20/W4)  | 5 | 1 T   |  2,054 | 2,192 |  67 |
-| HSS L=3 (H10/W4)  | 5 | 1 B   |  3,051 | 3,228 |  99 |
-| **SLH-DSA-128s**      | 1 | unbounded | 3,929 | 4,013 | **122 (measured)** |
-| XMSS-SHA2_10_256  | 5 | 1 K   |  3,320 | 4,495 | 138 |
-| XMSS-SHA2_10_192  | 3 | 1 K   |  2,541 | 5,088 | 156 |
-| XMSSMT 20/2_256   | 5 | 1 M   |  6,640 | 8,971 | 275 |
-| LMS_M32_H10/W8    | 5 | 1 K   |  8,712 | 8,725 | 268 |
-| SLH-DSA-128f      | 1 | unbounded | 11,839 | 12,095 | 371 |
-| XMSSMT 60/3_256   | 5 | 1 Q (2^60) | 9,963 | 13,627 | 418 |
+| Scheme | NIST level | sigs (capacity) | hash calls | total SHA-256 blocks | R1CS SHA-2 (M) | R1CS Poseidon (M)† |
+|---|--:|--:|--:|--:|--:|--:|
+| LMS_M24_H10/W4    | 3 | 1 K   |    819 |   822 |  25 | ~0.8 |
+| LMS_M32_H10/W4    | 5 | 1 K   |  1,017 | 1,076 |  33 | ~1.0 |
+| LMS_M32_H15/W4    | 5 | 32 K  |  1,022 | 1,086 |  33 | ~1.0 |
+| LMS_M32_H20/W4    | 5 | 1 M   |  1,027 | 1,096 |  34 | ~1.0 |
+| HSS L=2 (H10/W4)  | 5 | 1 M   |  2,034 | 2,152 |  66 | ~2.0 |
+| HSS L=2 (H15/W4)  | 5 | 1 B   |  2,044 | 2,172 |  67 | ~2.0 |
+| HSS L=2 (H20/W4)  | 5 | 1 T   |  2,054 | 2,192 |  67 | ~2.1 |
+| HSS L=3 (H10/W4)  | 5 | 1 B   |  3,051 | 3,228 |  99 | ~3.1 |
+| **SLH-DSA-128s**      | 1 | unbounded | 3,929 | 4,013 | **122 (measured)** | **~4.0 (measured)** |
+| XMSS-SHA2_10_256  | 5 | 1 K   |  3,320 | 4,495 | 138 | ~3.3 |
+| XMSS-SHA2_10_192  | 3 | 1 K   |  2,541 | 5,088 | 156 | ~2.5 |
+| XMSSMT 20/2_256   | 5 | 1 M   |  6,640 | 8,971 | 275 | ~6.6 |
+| LMS_M32_H10/W8    | 5 | 1 K   |  8,712 | 8,725 | 268 | ~8.7 |
+| SLH-DSA-128f      | 1 | unbounded | 11,839 | 12,095 | 371 | ~11.8 |
+| XMSSMT 60/3_256   | 5 | 1 Q (2^60) | 9,963 | 13,627 | 418 | ~10.0 |
+
+† Poseidon projection = `hash_calls × ~1.0 K constraints/call`, the
+average from the measured SLH-DSA-128s `main_poseidon` integration
+(3,992,159 ÷ 3,929 ≈ 1,016 / call). The substitution is **non-standard**
+— no FIPS / RFC scheme defines a Poseidon hash mode, and the security
+analysis does not transfer (§6.3). Per-call cost varies (~1 K for chain
+hashes, 5–25 K for arity-heavy compressions like `T_k` / `T_len` / LMS
+pubkey final), so the flat-multiplier projection may be off by ±10–20 %
+per row — but rank ordering is preserved. For XMSS / XMSS^MT the 1:1
+substitution keeps RAND_HASH's 3 PRF + 1 H structure; a Poseidon-native
+redesign (no bitmasks, no PRF) would shave another ~3× off those rows.
 
 ### 3.2 Why the ranking does not match intuition
 
