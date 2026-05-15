@@ -45,7 +45,7 @@ already committed by other apps, leaving ~10 GB free against an estimated
 12+ GB working set). Expected to compile on a less-loaded 24 GB system or
 any 32 GB+ machine. `main_poseidon` (4 M) compiles in <1 min, peak RSS <2 GB.
 
-## Spartan2 / OpenAC prove + verify benchmark
+## Spartan2 + Hyrax PCS prove + verify benchmark
 
 End-to-end prove + verify numbers for `main_poseidon` on the same
 Spartan2 backend that OpenAC's `wallet-unit-poc/ecdsa-spartan2` uses
