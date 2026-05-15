@@ -45,6 +45,25 @@ already committed by other apps, leaving ~10 GB free against an estimated
 12+ GB working set). Expected to compile on a less-loaded 24 GB system or
 any 32 GB+ machine. `main_poseidon` (4 M) compiles in <1 min, peak RSS <2 GB.
 
+## Spartan2 / OpenAC prove + verify benchmark
+
+End-to-end prove + verify numbers for `main_poseidon` on the same
+Spartan2 backend that OpenAC's `wallet-unit-poc/ecdsa-spartan2` uses
+(`T256HyraxEngine` / Hyrax-PC over secq256r1), captured on M3/24 GB:
+
+|  Phase  |       Time | Peak RSS | Artifact |     Size |
+|---------|-----------:|---------:|----------|---------:|
+| Setup   |  23,143 ms | 10.45 GB | Proving key | 2.37 GB |
+| Witness |   1,387 ms |        – | **Proof**   | **208.8 KB** |
+| Prove   |  16,184 ms |  5.41 GB | Verifying key | 2.37 GB |
+| Verify  |   9,522 ms |  3.11 GB |          |          |
+
+→ ~10–14× slower prove/verify than ecdsa-spartan2 jwt_1k (76 KB proof,
+1.1 s prove on M5/24 GB), tracking the R1CS-size ratio.
+
+Reproducer + Rust crate: [moven0831/slh-dsa-128s-poseidon-bench](https://github.com/moven0831/slh-dsa-128s-poseidon-bench).
+Full breakdown in [`results/slh_dsa_spartan2_1k.md`](results/slh_dsa_spartan2_1k.md).
+
 ## Quickstart
 
 ```bash
@@ -67,6 +86,10 @@ bash scripts/run_tests.sh      # 20 per-primitive correctness tests (Rust oracle
   the calibrated cost model.
 - [`docs/slh-dsa-primer.md`](docs/slh-dsa-primer.md) — what SLH-DSA is,
   what each primitive does, how to read the benchmark.
+- [`results/slh_dsa_spartan2_1k.md`](results/slh_dsa_spartan2_1k.md) —
+  Spartan2 / OpenAC end-to-end prove + verify numbers for the Poseidon
+  verifier; companion repo at
+  [moven0831/slh-dsa-128s-poseidon-bench](https://github.com/moven0831/slh-dsa-128s-poseidon-bench).
 - [`Dependencies.md`](Dependencies.md) — pinned versions and commit hashes.
 
 ## Layout

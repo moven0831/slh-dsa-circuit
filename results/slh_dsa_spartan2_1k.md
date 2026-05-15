@@ -1,8 +1,8 @@
-# SLH-DSA-128s (Poseidon, 1 KB msg) — Spartan2 benchmark
+# SLH-DSA-128s (Poseidon, 1 KB msg) — Spartan2 / OpenAC benchmark
 
 End-to-end benchmark of the SLH-DSA-128s Poseidon-hash signature verifier on
-zkID's Spartan2 stack, captured at
-[moven0831/slh-dsa-128s-poseidon-bench@feat/slh-dsa-spartan2-bench](https://github.com/moven0831/slh-dsa-128s-poseidon-bench/tree/feat/slh-dsa-spartan2-bench),
+the OpenAC Spartan2 stack, captured at
+[moven0831/slh-dsa-128s-poseidon-bench](https://github.com/moven0831/slh-dsa-128s-poseidon-bench),
 crate `wallet-unit-poc/slh-dsa-spartan2/`.
 
 ## Setup
@@ -27,8 +27,9 @@ crate `wallet-unit-poc/slh-dsa-spartan2/`.
 | Phase                       |        Time | Peak RSS |
 |-----------------------------|------------:|---------:|
 | Setup (R1CSSNARK::setup)    |  23,143 ms  | 10.45 GB |
-| Witnesscalc (Circom → witness) |  ~10,000 ms |        - |
-| Prep prove                  |       14 ms |        - |
+| Witnesscalc (Circom → witness) |   1,387 ms |        - |
+| Load proving key (file → mem)  |   4,281 ms |        - |
+| Prep prove                  |       20 ms |        - |
 | **Prove**                   | **16,184 ms** |  5.41 GB |
 | **Verify**                  |  **9,522 ms** |  3.11 GB |
 
