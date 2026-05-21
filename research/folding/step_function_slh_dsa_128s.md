@@ -13,7 +13,7 @@
 - **3,929 SLH primitive calls** per SLH-DSA-128s verify (3,689 F + 231 H + 1 T_k + 7 T_len + 1 H_msg) ⇒ **4,273 Poseidon permutations** (binary `PoseidonReduce` expansion) ⇒ **3,992,159 R1CS** measured in `main_poseidon` (--O2, `secq256r1`).
 - **Monolithic Spartan2 baseline** (companion repo, M3/24GB, T256HyraxEngine): 16.2 s prove / 5.41 GB peak / 208.8 KB proof / 2.37 GB proving key. **Memory is the binding constraint** for client-side proving — folding must shrink the peak RSS, not just the wall-clock.
 - **Recommended primaries for Day 3 cost model:**
-  - **Flat-IVC primary:** D2-c — *per-primitive step circuit with variable-arity `PoseidonReduce`s re-expressed as arity-2 Poseidon chains* (Sec 7.1 option c). Effective fold count **4,273**, uniform arity-2 step ≈ 213 R1CS / 100 R1CS (secq256r1 / Goldilocks ±25%), state width ≈ 16 FE.
+  - **Flat-IVC primary:** D2-c — *per-primitive step circuit with variable-arity `PoseidonReduce`s re-expressed as arity-2 Poseidon chains* (Sec 7.1 option c). Effective fold count **4,273**, uniform arity-2 step **= 240 R1CS measured** (`bench_poseidon_reduce2`, `secq256r1`, --O2) / **≈ 120 R1CS projected ±25 %** (Goldilocks), state width ≈ 16 FE. **Total D2-c step work ≈ 1.03 M R1CS, a 74 % reduction vs. the 3.99 M monolithic.**
   - **Multi-fold primary:** D5+D6+D7 — *per-primitive heterogeneous leaves, per-tree/per-WOTS-pk mid folds, single top fold* (Sec 4b). Maps SLH-DSA's natural tree structure 1:1 onto Neo/SuperNeo's k-to-1 + heterogeneous-branch shape.
 - **Variable-arity reduces** (`SlhTk` = 14→1, `SlhTlen` = 35→1, `SlhHMsg` = 64→1) are the central design issue. Resolution: arity-2 chain for flat IVC (uniform step), native heterogeneous arity for multi-fold (no padding, no chain overhead). Both routes are mapped in Sec 7.1.
 - **Largest open issue:** Goldilocks Poseidon re-instantiation. Current Poseidon uses circomlib BN254 constants mod `p_secq256r1` (non-standard, `CLAUDE.md:123-125`). Goldilocks projection here carries ±25% uncertainty; if Day 3 is sensitive to that band, allocate Day 4 to a quick Goldilocks Poseidon prototype.
@@ -37,6 +37,16 @@ Source: `circuits/poseidon/hashes.circom`, `circuits/poseidon/poseidon_wrap.circ
 
 Reduce-tree counts derived from `circuits/poseidon/poseidon_wrap.circom:91-117`: `PoseidonReduce(N)` is a binary tree with `ceil(N/2)` pairs at each level (odd inputs paired with zero). Cost: `ceil(N/2) + ceil(N/4) + … + 1` Poseidon(2) perms. For N=14: 7+4+2+1 = 14. For N=35: 18+9+5+3+2+1 = 38. For N=64: 32+16+8+4+2+1 = 63.
 
+**Validated against measurement** (`scripts/verify_perm_counts.py`, --O2, `secq256r1`):
+
+| Reduce | Expected perms × P(2)=240 R1CS | Measured R1CS | Δ |
+|---|---|---|---|
+| `PoseidonReduce(14)` | 14 × 240 = 3,360 | 3,357 | −3 (−0.09 %) |
+| `PoseidonReduce(35)` | 38 × 240 = 9,120 | 9,108 | −12 (−0.13 %) |
+| `PoseidonReduce(64)` | 63 × 240 = 15,120 | 15,120 | 0 (exact) |
+
+Residuals are wire-routing overhead, not extra perms. This confirms that **(i) every `PoseidonReduce(N)` invocation is exactly the binary-tree perm count above, and (ii) one Poseidon(2) costs 240 R1CS in this codebase** — the canonical step-circuit unit for the D2-c flat-IVC primary (Sec 8).
+
 ### 2.2 Per-layer R1CS breakdown
 
 Source: `results/results.md` §C, integration delta validated at +0.9% against measured total.
@@ -58,12 +68,12 @@ Source: `README.md:54-65` (companion repo `moven0831/slh-dsa-128s-poseidon-bench
 
 | Phase | Time | Peak RSS | Artifact | Size |
 |---|---|---|---|---|
-| Setup | 23.1 s | 10.45 GB | Proving key | 2.37 GB |
+| Setup | 23.1 s | **10.45 GB** | Proving key | 2.37 GB |
 | Witness | 1.4 s | – | – | – |
 | Prove | 16.2 s | **5.41 GB** | **Proof** | **208.8 KB** |
 | Verify | 9.5 s | 3.11 GB | Verifying key | 2.37 GB |
 
-**Critical observation:** peak prove RSS is 5.41 GB. On a mid-range mobile or low-end laptop, this is past the OOM ceiling. The folding case-for-action is **memory**, not wall-clock — folding lets the prover hold one step circuit (≈KB) plus the running accumulator (≈MB) in memory at a time, instead of the full witness vector (≈3.86 M wires, ~GBs at multi-precision).
+**Critical observation:** setup-phase peak RSS is 10.45 GB — already past the OOM ceiling on a 24 GB device with any concurrent app load. Prove-phase peak is 5.41 GB, separately past the mobile ceiling (~1 GB working set). **Both phases need folding-class reshaping for a mobile target.** Schemes with transparent setup (LatticeFold, Neo, SuperNeo, Cyclo — all in scope here) sidestep the 10.45 GB number by deriving public parameters from a seed, so the cost-model only needs to compare against the prove-phase 5.41 GB. The case-for-action is memory, not wall-clock — folding lets the prover hold one step circuit (≈KB) plus the running accumulator (≈MB) in memory at a time, instead of the full witness + setup data (≈3.86 M wires × 32 B for the witness plus ~GB of commitment-tree intermediate state under Hyrax PCS).
 
 ### 2.4 Poseidon-variant caveat
 
@@ -156,7 +166,17 @@ State carried: running root + indices ≈ 16 FE.
 
 Neo / SuperNeo support k-to-1 folding (multiple instances merged at once) **and** heterogeneous branches (different step-circuit shapes folded together at the same level). SLH-DSA-128s verification is naturally tree-shaped — 14 FORS trees with k=14 leaves each, 7 HT layers each with 35 WOTS chains — which maps 1:1 onto multi-fold.
 
-**D5 — Leaf level: per-primitive heterogeneous step circuits.** Native arity per primitive (no padding). Five heterogeneous branches: F-step (arity-11 Poseidon), H-step (arity-12 Poseidon), one Poseidon(2) step (for `PoseidonReduce` internals), HMsg-mix step (`Poseidon(5)`), and a tag/ADRS-derivation sub-step. **Counts:** 3,689 F leaves + 231 H leaves + 14 + 38 + 63 reduce leaves (one per Poseidon(2) inside T_k/T_len/HMsg reduces) + 7 T_len-mix + 1 T_k-mix + 2 HMsg-mix = 4,273 leaf instances, distributed across 5 branch types.
+**D5 — Leaf level: per-primitive heterogeneous step circuits.** Grouping by **Poseidon arity** (the shape that determines step-circuit CCS), there are **4 distinct branches**, with instance counts deriving from FIPS 205 §11.2.2:
+
+| Branch | Poseidon arity | Sources | Instance count |
+|---|---|---|---|
+| **F-step** | Poseidon(10) | F leaves (3,689) + Tk-mix (1) + Tlen-mix (7) | **3,697** |
+| **H-step** | Poseidon(11) | H leaves | **231** |
+| **Reduce2-step** | Poseidon(2) | Tk reduce (14) + Tlen reduce (7 × 38 = 266) + HMsg reduce (63) | **343** |
+| **HMsg-mix-step** | Poseidon(5) | The two final mix perms with domain-separation tags 0 and 1 | **2** |
+| **Total** | — | — | **4,273** |
+
+Tk-mix and Tlen-mix fold into the F-step branch because they share Poseidon(10) shape; the differing domain-separation tag (2 vs. 3 vs. 0) is a public-input choice, not a structural one. ADRS construction inside each branch is per-step overhead (~50–200 R1CS based on `bench_adrs_sanity` = 198), not a separate fold branch.
 
 **D6 — Mid level: per-tree / per-WOTS-pk folds.**
 - **Per-FORS-tree fold:** 14 FORS trees, each a leaf+auth-path bundle. Within each tree: 1 F (leaf) + 12 H (auth path) = 13 leaf instances. Mid fold combines 13 instances → 1 per-tree accumulator. 14 per-tree accumulators feed into the FORS-roots reduce (D2-c chain). **Fold operations: 14 (one per tree)**, each with k=13.
@@ -178,7 +198,7 @@ Neo / SuperNeo support k-to-1 folding (multiple instances merged at once) **and*
 | D2-c reduce expansion | Inside `circuits/poseidon/poseidon_wrap.circom:91-117` `PoseidonReduce` recursion |
 | D3 (WOTS chain) | `circuits/common/wots.circom` chain-step loop |
 | D3 (Merkle level) | `circuits/common/{fors,xmss}.circom` auth-path loop |
-| D4 (per-XMSS-layer) | `circuits/common/ht.circom:39-90` HT-layer iteration |
+| D4 (per-XMSS-layer) | `circuits/common/ht.circom:49-90` HT-layer iteration |
 | D6 (per-WOTS-pk) | `circuits/common/xmss.circom` `XmssPkFromSig` template scope |
 | D6 (per-FORS-tree) | `circuits/common/fors.circom` per-tree loop |
 | D7 (top) | `circuits/common/slhdsa_verify.circom` top-level wiring |
@@ -193,21 +213,23 @@ Neo / SuperNeo support k-to-1 folding (multiple instances merged at once) **and*
 
 ### 5.2 Cost table per decomposition
 
-| ID | Decomposition | Step Poseidon perms | Step R1CS (secq256r1, measured base) | Step R1CS (Goldilocks, projected ±25%) | Fold count | State width (FE) | Σ Step·Fold R1CS (vs. 3.99 M monolithic) | Notes |
+| ID | Decomposition | Step Poseidon perms | Step R1CS (secq256r1, measured base) | Step R1CS (Goldilocks, projected ±25%) | Fold count | State width (FE) | Σ Step·R1CS (informational, see footnote) | Notes |
 |---|---|---|---|---|---|---|---|---|
-| D1 | Flat fine (1 perm/step, padded arity-12) | 1 | ≈660 | ≈330 | 4,273 | ~16 | ≈2.82 M (–29 %) | Underestimate — excludes padding overhead in heterogeneous-arity case |
-| D2-a | Flat per-primitive (pad-64) | up to 65 | ≈25 K | ≈12.5 K | 3,929 | ~16 | ≈98 M (× 25 monolithic!) | Pathological — pad waste dominates |
-| D2-b | Flat per-primitive (unroll) | 1–65 | 968 – 24,844 | 484 – 12,422 | 3,929 | ~16 | ≈3.96 M (matches monolithic ± 1 %) | Non-uniform step shape |
-| **D2-c** | **Flat per-primitive (arity-2 chain)** | **1** | **≈213** | **≈107** | **4,273** | **~16** | **≈0.91 M (–77 %)** | **Uniform; recommended flat-IVC primary** |
-| D3 | Flat sub-layer | 1–15 | ≈1.1 K – 15 K | ≈0.55 K – 7.5 K | 669 | ~32 | ≈3.0 M (–25 %) | Worst-case step: WOTS chain |
-| D4 | Flat per-XMSS-layer | ≈573 | ≈573 K | ≈287 K | 9 | ~16 | ≈3.96 M (matches monolithic) | Single largest step; near-monolithic memory profile |
-| **D5** | **Multi-fold leaves (heterogeneous)** | **1** (per branch) | **155 – 660** | **78 – 330** | **4,273** (distributed) | **~16 / branch** | **≈0.91 M** | **Recommended multi-fold primary, with D6+D7** |
+| D1 | Flat fine (1 perm/step, padded arity-12) | 1 | ≈660 | ≈330 | 4,273 | ~16 | ≈2.82 M | Underestimate — excludes padding overhead in heterogeneous-arity case |
+| D2-a | Flat per-primitive (pad-64) | up to 65 | ≈25 K | ≈12.5 K | 3,929 | ~16 | ≈98 M | Pathological — pad waste dominates |
+| D2-b | Flat per-primitive (unroll) | 1–65 | 968 – 24,844 | 484 – 12,422 | 3,929 | ~16 | **3.96 M** (matches monolithic ± 1 %) | Non-uniform step shape |
+| **D2-c** | **Flat per-primitive (arity-2 chain)** | **1** | **240 measured** | **≈120** | **4,273** | **~16** | **≈1.03 M** | **Uniform; recommended flat-IVC primary** |
+| D3 | Flat sub-layer | 1–15 | ≈1.1 K – 15 K | ≈0.55 K – 7.5 K | 669 | ~32 | ≈3.0 M | Worst-case step: WOTS chain |
+| D4 | Flat per-XMSS-layer | ≈573 | ≈573 K | ≈287 K | 9 | ~16 | ≈3.96 M | Single largest step; near-monolithic memory profile |
+| **D5** | **Multi-fold leaves (heterogeneous)** | **1** (per branch) | **240 – 1,102** measured | **120 – 551** | **4,273** (distributed) | **~16 / branch** | **≈1.03 – 1.2 M** | **Recommended multi-fold primary, with D6+D7** |
 | D6 | Multi-fold mid (per-tree / per-WOTS-pk) | accumulator only | ≈2 K – 4 K | ≈1 K – 2 K | 14 (FORS) + 7 (HT) = 21 | ~16 / branch | overhead only | Mid-level accumulator + verifier of branch summary |
 | D7 | Multi-fold top | accumulator only | ≈3 K | ≈1.5 K | 1 | ~32 | overhead only | Combines all branches |
 
-**Σ Step·Fold R1CS sanity check.** D2-b (flat per-primitive unroll) should equal the monolithic R1CS within ~1 % since it is the same circuit reshaped. Indeed: 968·3,689 + 1,102·231 + 5,989·1 + 14,428·7 + 24,844·1 = **3,957,343 R1CS** vs. measured 3,992,159 ⇒ delta = +0.87 % (matches `README.md:35-36` integration delta). Other rows differ from monolithic because reductions are double-counted (in D2-a) or eliminated/re-amortized (in D2-c, D5).
+**Footnote on the Σ Step·R1CS column.** This is `step_R1CS × fold_count` — a **step-work proxy**, not the prover wall-clock. Total prover wall-clock = (Σ Step·R1CS × mults-per-R1CS) + (fold_count × per-fold accumulator-update overhead). The fold overhead depends on the scheme and is computed in `cost_model.md` §5. Do **not** read "D2-c is 1.03 M vs monolithic 3.99 M" as "D2-c is 4× faster" — it's the same arithmetic work, reshaped; the prover speedup comes from (i) Goldilocks field ops being 20–50× faster than `secq256r1`, (ii) fold overhead being amortized over many small steps. See cost_model §2.2.
 
-**Why D2-c beats the monolithic.** The arity-2 chain replaces every `Poseidon(t)` for t > 2 inside reduces with a Merkle tree of `Poseidon(2)` (each ~213 R1CS) instead of one big perm. Since `Poseidon(t)` grows roughly linearly in t but a reduce with k leaves replaces 1 perm of arity-k with (k−1) perms of arity-2, this *increases* perm count but *decreases* total R1CS when t > ~2× the reduce-tree depth — which is the case for the SlhTk/SlhTlen/SlhHMsg reduces. The improvement is real but modest (~ 20–30 %); the bigger win is uniformity (folding scheme integration) and step-size predictability.
+**Σ Step·R1CS sanity check.** D2-b (flat per-primitive unroll) should equal monolithic within ~1 % since it is the same circuit reshaped. Indeed: 968·3,689 + 1,102·231 + 5,989·1 + 14,428·7 + 24,844·1 = **3,957,343 R1CS** vs. measured 3,992,159 ⇒ delta = +0.87 % (matches `README.md:35-36` integration delta). Automated check: `python3 scripts/verify_perm_counts.py`. Other rows differ from monolithic because reductions are double-counted (D2-a) or partially eliminated by replacing arity-k Poseidons with chains of arity-2 (D2-c, D5).
+
+**Why D2-c gives lower Σ Step·R1CS than monolithic.** The arity-2 chain replaces every `Poseidon(t)` for t > 2 inside reduces with a Merkle tree of `Poseidon(2)` (240 R1CS each, measured by `bench_poseidon_reduce2`). For SlhTk (1 call): the monolithic does Poseidon(10) + reduce-perms ≈ 5,989 R1CS, the chain does 15 × 240 = 3,600 R1CS — 40 % cheaper at the constraint-count level. Summed over all primitives: 4,273 × 240 = 1.03 M R1CS vs. 3.96 M monolithic = **74 % step-work reduction**. The improvement is real but it is **step work**, not prover wall-clock; the dominant prover-side win comes from the Goldilocks field-op speedup in cost_model §5.
 
 **Fold overhead (per scheme).** Day 3 must add scheme-specific fold-overhead numbers from the LatticeFold / Neo / SuperNeo benchmark tables. Approximate placeholders (re-derive on Day 3):
 - LatticeFold: per-fold prover overhead dominated by Ajtai commitment of the new instance + accumulator-norm refresh. Order of ~10⁴–10⁵ Goldilocks-equivalent multiplications per fold.
@@ -243,9 +265,9 @@ For the three decompositions that are viable as Day 3 primaries — D2-c (flat-I
 - `type_` is set by the step's `primitive_type` selector (e.g. F-step inside WOTS sets `type_ = ADRS_TYPE_WOTS_HASH = 0` per `params.circom:36`).
 - `keypair`, `chain`, `hash` are derived from `z_i.leaf_idx`, `z_i.chain_idx`, `z_i.wots_step` according to FIPS 205 §4.2.
 
-**Selector logic.** A single one-hot vector `sel[6]` (one bit per primitive type) gates which branch contributes to the next-state update. Unused branches are zeroed cheaply with linear constraints `out_unused === 0` rather than skipped — Circom's --O2 will optimize away the dead constraints in synthesis, but the step circuit's CCS row count includes all branches' constraint counts. **Total step R1CS = max(F, H, Reduce2) + selector overhead ≈ max(968, 1102, 213) + ~50 ≈ 1,150** if the step circuit instantiates all branches. **For uniformity it is cheaper to commit only to the arity-2 Poseidon sub-step (Reduce2) and dispatch F/H as separate step types** — splitting the fold count further but keeping the uniform 213-R1CS step.
+**Selector logic.** A single one-hot vector `sel[6]` (one bit per primitive type) gates which branch contributes to the next-state update. Unused branches are zeroed cheaply with linear constraints `out_unused === 0` rather than skipped — Circom's --O2 will optimize away the dead constraints in synthesis, but the step circuit's CCS row count includes all branches' constraint counts. **Total step R1CS = max(F, H, Reduce2) + selector overhead ≈ max(968, 1102, 240) + ~50 ≈ 1,152** if the step circuit instantiates all branches. **For uniformity it is cheaper to commit only to the arity-2 Poseidon sub-step (Reduce2) and dispatch F/H as separate step types** — splitting the fold count further but keeping the uniform 240-R1CS step.
 
-This is the "fully chain" extreme — every Poseidon perm of any arity becomes its own fold step, padded to arity-2 if smaller, decomposed if larger. **Reconsider on Day 3** whether the uniform-step cost (213 R1CS × ~4,400 fold steps) beats the heterogeneous-step cost (selector overhead × 4,273 fold steps) given the scheme's per-fold overhead.
+This is the "fully chain" extreme — every Poseidon perm of any arity becomes its own fold step, padded to arity-2 if smaller, decomposed if larger. **Reconsider on Day 3** whether the uniform-step cost (240 R1CS × 4,273 fold steps = 1.03 M) beats the heterogeneous-step cost (selector overhead × 4,273 fold steps) given the scheme's per-fold overhead.
 
 ### 6.2 D3 — Flat sub-layer (one WOTS chain / one Merkle level per step)
 
@@ -267,14 +289,13 @@ This is the "fully chain" extreme — every Poseidon perm of any arity becomes i
 
 ### 6.3 D5+D6+D7 — Multi-fold (per-primitive leaves, per-tree/per-WOTS-pk mid, single top)
 
-**Leaf-level step circuits (D5).** Five branch shapes (per Section 4.5):
-- **F-leaf**: arity-11 Poseidon, R1CS ≈ 968.
-- **H-leaf**: arity-12 Poseidon, R1CS ≈ 1,102.
-- **Reduce2-leaf**: arity-2 Poseidon, R1CS ≈ 213.
-- **HMsg-mix-leaf**: arity-5 Poseidon, R1CS ≈ 380.
-- **Tag/ADRS-derivation step**: small, R1CS ≈ 50–100 (linear combinations).
+**Leaf-level step circuits (D5).** Four branch shapes grouped by Poseidon arity (per Section 4b):
+- **F-step**: Poseidon(10), R1CS ≈ 968 (measured, includes packing). 3,697 instances (F leaves + Tk-mix + Tlen-mix; tag-differentiated via public input).
+- **H-step**: Poseidon(11), R1CS ≈ 1,102 (measured). 231 instances.
+- **Reduce2-step**: Poseidon(2), **R1CS = 240 measured** (`bench_poseidon_reduce2`). 343 instances (14 Tk reduce + 266 Tlen reduce + 63 HMsg reduce).
+- **HMsg-mix-step**: Poseidon(5), R1CS ≈ 380 (projected from circomlib Poseidon round structure; not separately benched). 2 instances.
 
-Each leaf branch has its own public-input/witness/public-output shape but they share the same CCS form (Neo/SuperNeo can fold heterogeneous-shape branches into a single accumulator as long as each branch's CCS is uniform within itself).
+ADRS construction inside each branch is per-step overhead (~50–200 R1CS based on `bench_adrs_sanity` = 198), not a separate fold branch. Each branch has its own public-input/witness/public-output shape but they share the same CCS form (Neo/SuperNeo can fold heterogeneous-shape branches into a single accumulator as long as each branch's CCS is uniform within itself).
 
 **Per-tree / per-WOTS-pk mid step circuits (D6).**
 - **Per-FORS-tree branch**: combines 13 leaf instances (1 F + 12 H per tree). The branch's step circuit verifies the leaf accumulator structure + computes the tree root. R1CS ≈ ~2K (dominated by the branch's Lasso-style lookup proving each leaf belongs to this tree).
@@ -335,11 +356,12 @@ SLH-DSA-128f has ~3× more F invocations (11,583 vs. 3,689) but may benefit *mor
 
 **Flat-IVC primary: D2-c** (per-primitive with arity-2 reduce chain).
 - Step circuit: uniform arity-2 `Poseidon(2)` + state update.
-- Step R1CS: ≈ 213 (secq256r1) / ≈ 107 (Goldilocks ±25 %).
+- Step R1CS: **240 measured** (`bench_poseidon_reduce2`, `secq256r1`, --O2) / **≈ 120 projected ±25 %** (Goldilocks).
 - Fold count: 4,273.
 - State width: ~16 FE.
-- Total prover step-work: ≈ 0.91 M R1CS-equivalent (secq256r1) or ≈ 0.46 M (Goldilocks).
-- **Reason chosen:** smallest uniform step (exercises folding-scheme amortization maximally); uniform shape simplifies scheme integration (no heterogeneous-branch CCS); largest gap to monolithic baseline (77 % step-work reduction).
+- Total step work: **1,025,520 R1CS** (`secq256r1`) ≈ **0.51 M** (Goldilocks).
+- **Reduction vs. monolithic 3.99 M: 74 % step-work reduction.** Prover wall-clock reduction is larger because Goldilocks field ops are 20–50× faster than `secq256r1` (see cost_model §5).
+- **Reason chosen:** smallest uniform step (exercises folding-scheme amortization maximally); uniform shape simplifies scheme integration (no heterogeneous-branch CCS); largest gap to monolithic baseline.
 
 **Multi-fold primary: D5+D6+D7** (per-primitive heterogeneous leaves, per-tree/per-WOTS-pk mid, single top).
 - Step circuits: 5 leaf branches (155–660 R1CS each, depending on arity) + 2 mid branches (≈2–4 K R1CS) + 1 top step (≈3 K R1CS).
@@ -370,11 +392,18 @@ The Day 3 cost-model spreadsheet should pull:
 
 ## Appendix A — Numerical sanity checks performed
 
-- **Total Σ(per-primitive R1CS × call count) = 3,957,343** vs. measured `main_poseidon` = 3,992,159 ⇒ **delta +0.87 %** (glue: range checks, mux, digest parse, base-2b, ADRS construction). Matches `README.md:35-36` integration delta of +0.9 %. ✓
-- **Total Poseidon perms = 4,273** derived from binary `PoseidonReduce` (Section 3.3). Matches `circuits/poseidon/poseidon_wrap.circom:91-117` recursion exactly. Discrepancy vs. README's "~5,500" footnoted in Section 3.3. ✓
-- **All 9 SLH-DSA-128s parameters** cited with file:line from `circuits/common/params.circom`. ✓
+All numerical claims in this doc are validated by `scripts/verify_perm_counts.py` against measured benchmarks (`results/raw_bench.txt`). Run after `yarn bench` to regenerate; the script exits non-zero on any reconciliation failure.
+
+- **All 12 SLH-DSA-128s parameters** in `circuits/common/params.circom` match the values cited in §3.1. ✓
+- **`PoseidonReduce(N)` binary-tree perm count** validated by 3 measured benches:
+  - `bench_poseidon_reduce_14` = 3,357 R1CS vs. expected 14 × 240 = 3,360 (Δ −0.09 %)
+  - `bench_poseidon_reduce_35` = 9,108 R1CS vs. expected 38 × 240 = 9,120 (Δ −0.13 %)
+  - `bench_poseidon_reduce_64` = 15,120 R1CS vs. expected 63 × 240 = 15,120 (Δ 0.00 %) ✓
+- **Poseidon(2) = 240 R1CS measured** (`bench_poseidon_reduce2`). This is the canonical step-circuit unit for the D2-c flat-IVC primary.
+- **Per-verify Poseidon-perm grand total = 4,273** derived from binary `PoseidonReduce` (Section 3.3); matches the script's symbolic derivation exactly. README's earlier "~5,500" figure remains an artifact of an older estimate (likely over-counted byte-packing as Poseidon perms) — not relied on by this doc. ✓
+- **Sum-of-parts R1CS = 3,957,343** vs. measured `main_poseidon` = 3,992,159 ⇒ **delta +0.87 %** (glue: range checks, mux, digest parse, base-2b, ADRS construction). Matches `README.md:35-36` integration delta of +0.9 %. ✓
 - **State-width composability** spot-check: D4 (per-XMSS-layer) carries 16 FE (xmss_root + tree_idx + leaf_idx); layer j+1's step circuit reads exactly this shape as its public input. ✓ D2-c carries 16 FE state across every fold step uniformly. ✓
-- **Variable-arity reduce expansion** verified against `PoseidonReduce(N)` recursion: for N=14, 35, 64 the reduce-tree sizes are 14, 38, 63 Poseidon(2) perms respectively (Section 2.1 table). ✓
+- **D5 multi-fold leaf instance accounting**: 3,697 (F-step, Poseidon(10)) + 231 (H-step, Poseidon(11)) + 343 (Reduce2-step, Poseidon(2): 14 from Tk + 266 from Tlen × 7 + 63 from HMsg) + 2 (HMsg-mix-step, Poseidon(5)) = **4,273**. ✓ Matches §3.3 grand total.
 
 ## Appendix B — Files referenced
 

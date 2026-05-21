@@ -166,8 +166,10 @@ Pulled from `research/folding/step_function_slh_dsa_128s.md` §5.2. Step prover 
 
 | Field | Step R1CS | Mults per step | Fold count | Total step mults | Single-core step time |
 |---|---|---|---|---|---|
-| `secq256r1` | 213 | 6,400 | 4,273 | 27.3 M | ~3–5 s |
-| Goldilocks | 107 ±25 % | 3,200 ±25 % | 4,273 | 13.7 M | **~140 ms** |
+| `secq256r1` | **240 measured** | 7,200 | 4,273 | 30.8 M | ~3–6 s |
+| Goldilocks | **≈120 ±25 %** | 3,600 ±25 % | 4,273 | 15.4 M | **~155 ms** |
+
+Step R1CS measured via `bench_poseidon_reduce2` (240 R1CS, --O2, `secq256r1`) — the pure `circomlib` Poseidon(2) perm. Total step work = step R1CS × fold count = **1,025,520 R1CS** (`secq256r1`) ≈ **0.51 M** (Goldilocks ±25 %). Validates via `scripts/verify_perm_counts.py`.
 
 ### 4.2 Multi-fold primary D5+D6+D7
 
@@ -175,14 +177,14 @@ Heterogeneous branches. Per-branch mults computed individually then summed.
 
 **D5 leaves:**
 
-| Branch | Step R1CS (secq) | Instances | Total mults (secq) | Total mults (Goldilocks ±25 %) |
+| Branch | Step R1CS (secq, measured) | Instances | Total mults (secq) | Total mults (Goldilocks ±25 %) |
 |---|---|---|---|---|
-| F-leaf | 968 | 3,689 | 107 M | 54 M |
-| H-leaf | 1,102 | 231 | 7.6 M | 3.8 M |
-| Reduce2 | 213 | 4,273 − (3,689 + 231 + 7 + 1 + 2) = 343 *(net new perms from reduce chains)* | 2.2 M | 1.1 M |
-| HMsg-mix | 380 | 2 | 23 K | 12 K |
-| Tag/ADRS | ~80 | ~50 | 0.12 M | 60 K |
-| **D5 leaf total** | | | **117 M** | **59 M ± 15 M** |
+| F-step (Poseidon(10)) | 968 | 3,697 (F leaves + Tk-mix + Tlen-mix) | 107 M | 54 M |
+| H-step (Poseidon(11)) | 1,102 | 231 | 7.6 M | 3.8 M |
+| Reduce2-step (Poseidon(2)) | **240** | 343 (14 Tk + 266 Tlen + 63 HMsg) | 2.5 M | 1.2 M |
+| HMsg-mix-step (Poseidon(5)) | ≈380 (projected) | 2 | 23 K | 12 K |
+| ADRS overhead (per-step) | ≈200 (bench_adrs_sanity = 198) | 4,273 | 25.6 M | 12.8 M |
+| **D5 leaf total** | | **4,273 fold steps** | **143 M** | **72 M ± 18 M** |
 
 **D6 mid + D7 top:**
 
@@ -194,8 +196,8 @@ Heterogeneous branches. Per-branch mults computed individually then summed.
 | **Mid+top total** | | | **1.77 M** | **0.89 M** |
 
 **Grand total step mults (D5+D6+D7):**
-- `secq256r1`: 117 + 1.77 = **~119 M mults** → single-core ~12–60 s, **multi-core (4-way parallelism) ~3–15 s**.
-- Goldilocks: 59 + 0.89 = **~60 M mults ± 15 M** → single-core ~600 ms – 2 s, **multi-core ~150–500 ms**.
+- `secq256r1`: 143 + 1.77 = **~145 M mults** → single-core ~15–70 s, **multi-core (4-way parallelism) ~4–18 s**.
+- Goldilocks: 72 + 0.89 = **~73 M mults ± 18 M** → single-core ~700 ms – 2.5 s, **multi-core ~180–600 ms**.
 
 ### 4.3 Step-work observation
 
@@ -223,11 +225,11 @@ Total = step work + fold overhead × fold count. Single-core estimates unless no
 
 | Scheme | Step (D2-c flat) | Folds (D2-c flat) | **Total D2-c** | Step (D5+D6+D7 multi-fold, 4-core) | Folds (D5+D6+D7) | **Total multi-fold (4-core)** |
 |---|---|---|---|---|---|---|
-| LatticeFold | 140 ms | 43 s | ~43 s ❌ | – | – | n/a |
-| LatticeFold+ | 140 ms | 26 s | ~26 s ❌ | – | – | n/a |
-| Neo | 140 ms | 0.43 s | **~0.6 s** ✓ | – | – | n/a |
-| **SuperNeo** | **140 ms** | **0.43 s** | **~0.6 s** ✓ | **150–500 ms** | **0.43 s** | **~0.6–1.0 s** ✓ |
-| Cyclo | 140 ms | 17 s | ~17 s ❌ | – | – | n/a |
+| LatticeFold | 155 ms | 43 s | ~43 s ❌ | – | – | n/a |
+| LatticeFold+ | 155 ms | 26 s | ~26 s ❌ | – | – | n/a |
+| Neo | 155 ms | 0.43 s | **~0.6 s** ✓ | – | – | n/a |
+| **SuperNeo** | **155 ms** | **0.43 s** | **~0.6 s** ✓ | **150–500 ms** | **0.43 s** | **~0.6–1.0 s** ✓ |
+| Cyclo | 155 ms | 17 s | ~17 s ❌ | – | – | n/a |
 
 **Winner:** Neo or SuperNeo + D2-c on Goldilocks, ~0.6 s total prover (single-core). Multi-fold on SuperNeo is comparable on a 4-core mobile CPU but with the advantage of avoiding variable-arity padding and supporting heterogeneous branches.
 
@@ -239,7 +241,7 @@ For LatticeFold+ (best ring-based), flip to D3 sub-layer (669 folds) or D4 per-X
 
 | Decomposition | Folds | Per-fold | Step work (Goldilocks) | Total |
 |---|---|---|---|---|
-| D2-c flat (uniform 213 R1CS) | 4,273 | 6 ms | 140 ms | ~26 s |
+| D2-c flat (uniform 213 R1CS) | 4,273 | 6 ms | 155 ms | ~26 s |
 | D3 sub-layer (avg ~5K R1CS) | 669 | 6 ms | ~3.4 s | **~7.4 s** |
 | D4 per-XMSS-layer (~573K R1CS) | 9 | 6 ms | ~3.6 s | **~3.7 s** |
 
@@ -322,7 +324,7 @@ Which inputs, if wrong by 2×, change the recommendation?
 | Neo/SuperNeo per-fold (currently 100 μs) | actually 1 ms (10×) | total D2-c jumps to ~5 s, multi-fold to ~3 s | Multi-fold beats flat IVC by ~2×. SuperNeo + D5+D6+D7 becomes clear winner. |
 | Neo/SuperNeo per-fold (currently 100 μs) | actually 10 μs (10× better) | total D2-c drops to ~0.3 s | Conclusion stable; flat IVC slightly preferred for simplicity. |
 | LatticeFold+ per-fold (currently 6 ms) | actually 1 ms (6× better) | total D4 drops to ~3.5 s | Approaches Neo/SuperNeo territory; ring-based schemes become viable backup. |
-| Goldilocks Poseidon re-instantiation slips Week 2 | secq256r1 only | D2-c step time 3–5 s instead of 140 ms | **Major impact.** Goldilocks delta = ~30× prover slowdown. Day 5 must decide whether to ship secq256r1 v1 or wait for Goldilocks. |
+| Goldilocks Poseidon re-instantiation slips Week 2 | secq256r1 only | D2-c step time 3–5 s instead of 155 ms | **Major impact.** Goldilocks delta = ~30× prover slowdown. Day 5 must decide whether to ship secq256r1 v1 or wait for Goldilocks. |
 | Per-branch parallelism limited to 1 core (no multi-core) | multi-fold loses parallel advantage | D5+D6+D7 wall-clock 4× higher | Flat IVC D2-c becomes dominant; multi-fold's only advantage is heterogeneous-arity. |
 
 **Top three uncertainties driving Day 5:**

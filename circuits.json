@@ -97,6 +97,26 @@
     "template": "BenchPoseidonHMsg",
     "params": []
   },
+  "bench_poseidon_reduce2": {
+    "file": "bench/bench_poseidon_reduce2",
+    "template": "BenchPoseidonReduce2",
+    "params": []
+  },
+  "bench_poseidon_reduce_14": {
+    "file": "bench/bench_poseidon_reduce_chain",
+    "template": "BenchPoseidonReduceChain",
+    "params": [14]
+  },
+  "bench_poseidon_reduce_35": {
+    "file": "bench/bench_poseidon_reduce_chain",
+    "template": "BenchPoseidonReduceChain",
+    "params": [35]
+  },
+  "bench_poseidon_reduce_64": {
+    "file": "bench/bench_poseidon_reduce_chain",
+    "template": "BenchPoseidonReduceChain",
+    "params": [64]
+  },
   "bench_adrs_sanity": {
     "file": "bench/bench_adrs_sanity",
     "template": "BenchAdrsSanity",

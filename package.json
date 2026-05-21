@@ -9,6 +9,7 @@
     "vendor": "bash scripts/vendor.sh",
     "bench": "bash scripts/bench.sh",
     "parse": "python3 scripts/parse_r1cs_stats.py",
+    "verify:folding": "python3 scripts/verify_perm_counts.py",
     "witness": "bash scripts/gen_witness.sh",
     "negative": "bash scripts/negative_test.sh",
     "compile:sha2": "circomkit compile main_sha2",

@@ -73,6 +73,7 @@ bash scripts/vendor.sh         # clones bkomuves/hash-circuits + integritychain/
 yarn bench                     # compiles every circuit in circuits.json → results/raw_bench.txt
 yarn parse                     # → results/results_summary.md
 bash scripts/run_tests.sh      # 20 per-primitive correctness tests (Rust oracle ↔ circom)
+yarn verify:folding            # validate research/folding/ numbers against measured benches
 ```
 
 ## Documentation
