@@ -1,37 +1,27 @@
 #!/usr/bin/env python3
 """Parse results/raw_bench.txt into a Markdown summary table at results/results.md."""
 
-import re
 import sys
 from pathlib import Path
 
+from folding_lib import (
+    RAW_BENCH,
+    compute_invocation_counts,
+    parse_line,
+    read_params,
+)
+
 ROOT = Path(__file__).resolve().parent.parent
-RAW = ROOT / "results" / "raw_bench.txt"
 OUT = ROOT / "results" / "results_summary.md"
 
 
-def parse_line(line: str) -> dict | None:
-    if line.startswith("#") or not line.strip():
-        return None
-    m = re.match(r"^(\S+)\s+(OK|FAILED)\s+(.*)$", line)
-    if not m:
-        return None
-    name, status, rest = m.groups()
-    fields = {"circuit": name, "status": status}
-    for kv in rest.split():
-        if "=" in kv:
-            k, v = kv.split("=", 1)
-            fields[k] = v
-    return fields
-
-
 def main():
-    if not RAW.exists():
-        print(f"raw_bench.txt not found at {RAW}; run scripts/bench.sh first", file=sys.stderr)
+    if not RAW_BENCH.exists():
+        print(f"raw_bench.txt not found at {RAW_BENCH}; run scripts/bench.sh first", file=sys.stderr)
         sys.exit(1)
 
     rows = []
-    for line in RAW.read_text().splitlines():
+    for line in RAW_BENCH.read_text().splitlines():
         d = parse_line(line)
         if d:
             rows.append(d)
@@ -46,16 +36,11 @@ def main():
         sub += "|" + "-" * 11
     table_lines.append("|" + "-" * 11 + "|" + "-" * 13 + sub + "|")
 
-    invocation_counts = {
-        "F": 14 + 7 * 35 * 15,           # FORS leaves + WOTS chain
-        "H": 168 + 7 * 9,                # FORS path + XMSS path
-        "Tk": 1,
-        "Tlen": 7,
-        "HMsg": 1,
-    }
+    # Derive invocation counts from params.circom (single source of truth shared
+    # with scripts/verify_perm_counts.py). Avoids drift if params ever change.
+    invocation_counts = compute_invocation_counts(read_params())
 
     rows_by_name = {r["circuit"]: r for r in rows}
-    summary_lines = []
     for prim in primitives:
         line = f"| {prim} | {invocation_counts[prim]} |"
         for fam in families:

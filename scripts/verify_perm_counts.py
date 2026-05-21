@@ -24,15 +24,21 @@ failure so this can be a CI check.
 
 from __future__ import annotations
 
-import math
-import re
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-PARAMS_FILE = ROOT / "circuits" / "common" / "params.circom"
-RAW_BENCH = ROOT / "results" / "raw_bench.txt"
+from folding_lib import (
+    compute_invocation_counts,
+    poseidon_reduce_perm_count,
+    read_bench_constraints,
+    read_params,
+)
+
+# Tolerance bands for the five reconciliation checks.
+TOL_REDUCE_PCT = 1.0   # PoseidonReduce R1CS ≈ perms × P(2), modulo wire-routing overhead
+TOL_EXACT = 0.0        # symbolic perm count: must match exactly
+TOL_SUM_PCT = 2.0      # sum-of-parts vs measured main: byte-packing glue at the boundaries
+TOL_DOC_DRIFT = 1.0    # design-doc canonical numbers vs measured (regression detector)
 
 # Design-doc claims (research/folding/step_function_slh_dsa_128s.md §3.1).
 EXPECTED_PARAMS = {
@@ -51,42 +57,6 @@ EXPECTED_PARAMS = {
 }
 
 
-def read_params() -> dict[str, int]:
-    """Parse `function SLH_*() { return N; }` entries from params.circom."""
-    text = PARAMS_FILE.read_text()
-    params: dict[str, int] = {}
-    for m in re.finditer(r"function\s+(SLH_\w+)\(\)\s*\{\s*return\s+(\d+)\s*;\s*\}", text):
-        params[m.group(1)] = int(m.group(2))
-    return params
-
-
-def read_bench() -> dict[str, int]:
-    """Parse circuit-name → nConstraints from raw_bench.txt."""
-    if not RAW_BENCH.exists():
-        sys.stderr.write(f"ERROR: {RAW_BENCH} missing — run `yarn bench` first.\n")
-        sys.exit(1)
-    out: dict[str, int] = {}
-    for line in RAW_BENCH.read_text().splitlines():
-        m = re.match(r"^(\S+)\s+OK\s+.*nConstraints=(\d+)", line)
-        if m:
-            out[m.group(1)] = int(m.group(2))
-    return out
-
-
-def poseidon_reduce_perm_count(n: int) -> int:
-    """Number of Poseidon(2) permutations PoseidonReduce(n) instantiates.
-
-    Matches `circuits/poseidon/poseidon_wrap.circom:91-117`: at each level
-    pair `ceil(n/2)` inputs (odd-out paired with zero), recurse until 1.
-    """
-    total = 0
-    while n > 1:
-        pairs = (n + 1) // 2
-        total += pairs
-        n = pairs
-    return total
-
-
 @dataclass
 class Check:
     name: str
@@ -97,6 +67,7 @@ class Check:
 
     @property
     def passed(self) -> bool:
+        # When expected==0, tolerance_pct is treated as an absolute threshold.
         if self.expected == 0:
             return abs(self.actual) <= self.tolerance_pct
         return abs(self.actual - self.expected) / abs(self.expected) * 100 <= self.tolerance_pct
@@ -113,15 +84,16 @@ class Check:
 
 def main() -> int:
     params = read_params()
-    bench = read_bench()
+    bench = read_bench_constraints()
 
     print("=" * 72)
     print("Validating research/folding/step_function_slh_dsa_128s.md numbers")
     print("=" * 72)
 
+    failures = 0
+
     # --- Check 1: SLH-DSA-128s parameters ---
     print("\n[1] SLH-DSA-128s parameters from circuits/common/params.circom")
-    failures = 0
     for k, expected in EXPECTED_PARAMS.items():
         actual = params.get(k)
         if actual is None:
@@ -141,10 +113,8 @@ def main() -> int:
         failures += 1
     else:
         print(f"  Poseidon(2) baseline R1CS = {p2_r1cs}")
-        reduce_checks = []
         for n in (14, 35, 64):
             expected_perms = poseidon_reduce_perm_count(n)
-            expected_r1cs = expected_perms * p2_r1cs
             actual_r1cs = bench.get(f"bench_poseidon_reduce_{n}")
             if actual_r1cs is None:
                 print(f"  [SKIP] bench_poseidon_reduce_{n} not measured")
@@ -152,55 +122,36 @@ def main() -> int:
                 continue
             chk = Check(
                 name=f"PoseidonReduce({n}) = {expected_perms} × P(2)",
-                expected=expected_r1cs,
+                expected=expected_perms * p2_r1cs,
                 actual=actual_r1cs,
-                tolerance_pct=1.0,
+                tolerance_pct=TOL_REDUCE_PCT,
                 units=" R1CS",
             )
-            reduce_checks.append(chk)
             print(chk.report())
             if not chk.passed:
                 failures += 1
 
     # --- Check 3: Per-verify Poseidon-permutation grand total ---
     print("\n[3] Per-verify Poseidon-perm derivation (design doc §3.3 claim: 4,273)")
-    k_param, a_param = params["SLH_K"], params["SLH_A"]
-    d_param, hp_param = params["SLH_D"], params["SLH_HPRIME"]
-    len_param, w_param = params["SLH_LEN"], params["SLH_W"]
-
-    # Per-primitive Poseidon-perm cost: 1 + PoseidonReduce(arity) for compress
-    # primitives; 1 for F/H; 2 + reduce for HMsg.
-    perms_per_F = 1
-    perms_per_H = 1
-    perms_per_Tk = 1 + poseidon_reduce_perm_count(k_param)              # 1 mix + reduce(k)
-    perms_per_Tlen = 1 + poseidon_reduce_perm_count(len_param)          # 1 mix + reduce(len)
-    perms_per_HMsg = 2 + poseidon_reduce_perm_count(64)                 # 2 mix + reduce(64) [M=1024B=64 FE]
-
-    calls = {
-        "F": k_param + d_param * len_param * (w_param - 1),     # FORS leaves + WOTS chain steps
-        "H": k_param * a_param + d_param * hp_param,            # FORS auth + XMSS path
-        "Tk": 1,
-        "Tlen": d_param,
-        "HMsg": 1,
-    }
+    calls = compute_invocation_counts(params)
+    # Per-primitive Poseidon-perm count: 1 for F/H; 1 mix + reduce(arity) for
+    # T_k/T_len; 2 mix + reduce(64) for H_msg (M=1024 B = 64 FE).
     perm_per_call = {
-        "F": perms_per_F,
-        "H": perms_per_H,
-        "Tk": perms_per_Tk,
-        "Tlen": perms_per_Tlen,
-        "HMsg": perms_per_HMsg,
+        "F": 1,
+        "H": 1,
+        "Tk": 1 + poseidon_reduce_perm_count(params["SLH_K"]),
+        "Tlen": 1 + poseidon_reduce_perm_count(params["SLH_LEN"]),
+        "HMsg": 2 + poseidon_reduce_perm_count(64),
     }
     print(f"  Per-primitive call counts: {calls}")
     print(f"  Perms per call: {perm_per_call}")
-
     grand_total_perms = sum(calls[p] * perm_per_call[p] for p in calls)
     print(f"  Grand total Poseidon perms per verify = {grand_total_perms}")
-
     chk = Check(
         name="grand-total perms = 4,273",
         expected=4273,
         actual=grand_total_perms,
-        tolerance_pct=0.0,
+        tolerance_pct=TOL_EXACT,
         units=" perms",
     )
     print(chk.report())
@@ -209,13 +160,7 @@ def main() -> int:
 
     # --- Check 4: Σ(per-prim R1CS × call count) vs measured main_poseidon ---
     print("\n[4] Per-primitive R1CS × call counts vs measured main_poseidon")
-    measured_per_prim = {
-        "F": bench.get("bench_poseidon_F"),
-        "H": bench.get("bench_poseidon_H"),
-        "Tk": bench.get("bench_poseidon_Tk"),
-        "Tlen": bench.get("bench_poseidon_Tlen"),
-        "HMsg": bench.get("bench_poseidon_HMsg"),
-    }
+    measured_per_prim = {p: bench.get(f"bench_poseidon_{p}") for p in calls}
     main_r1cs = bench.get("main_poseidon")
     if any(v is None for v in measured_per_prim.values()) or main_r1cs is None:
         print("  [SKIP] missing per-primitive or main_poseidon measurement")
@@ -231,7 +176,7 @@ def main() -> int:
             name="sum-of-parts reconciles to ≤2% of main_poseidon",
             expected=main_r1cs,
             actual=sum_of_parts,
-            tolerance_pct=2.0,
+            tolerance_pct=TOL_SUM_PCT,
             units=" R1CS",
         )
         print(chk.report())
@@ -240,29 +185,26 @@ def main() -> int:
 
     # --- Check 5: D2-c flat-IVC step cost (canonical for Week 2) ---
     print("\n[5] D2-c flat-IVC step cost (canonical for scheme_selection.md)")
-    if p2_r1cs is None:
-        print("  [SKIP] bench_poseidon_reduce2 missing")
+    if p2_r1cs is None or main_r1cs is None:
+        print("  [SKIP] missing Poseidon(2) or main_poseidon measurement")
     else:
-        step_r1cs = p2_r1cs
-        d2c_fold_count = grand_total_perms
-        d2c_total = step_r1cs * d2c_fold_count
-        reduction_pct = (1 - d2c_total / main_r1cs) * 100 if main_r1cs else 0
-        print(f"  D2-c step circuit: 1× Poseidon(2) = {step_r1cs} R1CS")
-        print(f"  D2-c fold count: {d2c_fold_count}")
+        d2c_total = p2_r1cs * grand_total_perms
+        reduction_pct = (1 - d2c_total / main_r1cs) * 100
+        print(f"  D2-c step circuit: 1× Poseidon(2) = {p2_r1cs} R1CS")
+        print(f"  D2-c fold count: {grand_total_perms}")
         print(f"  D2-c total step work: {d2c_total:,} R1CS")
-        if main_r1cs:
-            print(f"  Reduction vs monolithic {main_r1cs:,}: {reduction_pct:.1f}%")
-        # Sanity vs design-doc canonical numbers (post-validation).
-        # Update these when the doc claims change; mismatch fires [STALE]
-        # so the verifier doubles as a regression detector.
-        DOC_CANONICAL = {
-            "step R1CS": (240, step_r1cs),
+        print(f"  Reduction vs monolithic {main_r1cs:,}: {reduction_pct:.1f}%")
+        # Design-doc canonical numbers — must match the values cited in the
+        # doc itself. Update both this dict and the doc together. The drift
+        # check makes the verifier a one-way ratchet against silent rot.
+        doc_canonical = {
+            "step R1CS": (240, p2_r1cs),
             "total D2-c R1CS": (1_025_520, d2c_total),
             "reduction vs monolithic (%)": (74.3, reduction_pct),
         }
-        for label, (claimed, measured) in DOC_CANONICAL.items():
+        for label, (claimed, measured) in doc_canonical.items():
             drift = (measured - claimed) / claimed * 100 if claimed else 0
-            tag = "OK" if abs(drift) < 1 else "STALE"
+            tag = "OK" if abs(drift) < TOL_DOC_DRIFT else "STALE"
             print(
                 f"  [{tag}] doc claim {label} = {claimed:,} vs measured {measured:,.1f} "
                 f"({drift:+.2f}%)"
