@@ -90,6 +90,13 @@ bash scripts/run_tests.sh      # 20 per-primitive correctness tests (Rust oracle
   Spartan2 / OpenAC end-to-end prove + verify numbers for the Poseidon
   verifier; companion repo at
   [moven0831/slh-dsa-128s-poseidon-bench](https://github.com/moven0831/slh-dsa-128s-poseidon-bench).
+- [`research/folding/`](research/folding/) — Week 1 lattice-folding
+  research: step-function design
+  ([`step_function_slh_dsa_128s.md`](research/folding/step_function_slh_dsa_128s.md)),
+  cost model ([`cost_model.md`](research/folding/cost_model.md)), and
+  scheme selection ([`scheme_selection.md`](research/folding/scheme_selection.md))
+  toward client-side proving on mobile. **Forward-looking — projections, not
+  yet measured; refine in Week 2 prototype.**
 - [`Dependencies.md`](Dependencies.md) — pinned versions and commit hashes.
 
 ## Layout
