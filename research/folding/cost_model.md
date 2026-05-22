@@ -22,13 +22,17 @@
 | **Verifier wall-clock** | 9.5 s | 0.1–3 s (scheme-dependent) | up to 100× |
 | **Setup size (PK)** | 2.37 GB | 10–500 MB (transparent setup possible) | 5–250× |
 
-**Top recommendations (going into Day 5):**
+**Top recommendations (revised 2026-05-22 after literature survey, see §3 + §11):**
 
-1. **SuperNeo + D5+D6+D7 multi-fold + Goldilocks Poseidon** (with Spartan2 finisher) — best total profile. Highest implementation risk (newest scheme, 2026).
-2. **Neo + D2-c flat-IVC + Goldilocks Poseidon** (with Spartan2 finisher) — slightly worse parallelism, lower risk. Falls over if per-fold overhead is >10⁵ Goldilocks-mults.
-3. **LatticeFold+ + D2-c flat-IVC + secq256r1 (no Poseidon re-instantiation)** — most conservative path. Higher prover time (~10× slower than #1) but no Poseidon redesign required. Memory wins still ~30×.
+1. **SuperNeo (k-to-1) + Nebula switchboard NIVC + D5+D6+D7 multi-fold + Goldilocks Poseidon** + Spartan2 finisher — best *potential* profile, but **highest implementation risk**: Neo/SuperNeo natively do k-to-1 on *same-shape* instances only; heterogeneous-branch multi-fold requires layering Nebula (ePrint 2024/1605) or SuperNova/NIVC (ePrint 2022/1758) on top. **No published implementation of this stack exists** (Sonobe issue #144 confirms NIVC is unimplemented across all major open-source folding libs as of 2026-05).
+2. **SuperNeo or Neo + D4 (per-XMSS-layer) + Goldilocks Poseidon** + Spartan2 finisher — **conservative new lead recommendation**. D4's 9-fold count makes fold overhead vanish; total work ≈ 5.2 M R1CS, **8.4 × lower than D2-c** under the Nova-class 10 K R1CS recursion-circuit baseline (SuperNeo §1.1 D6 + `oskarth/nova-bench`). Lowest impl risk on Goldilocks path.
+3. **Neo + D2-c (per-arity-2 chain) + Goldilocks Poseidon** + Spartan2 finisher — **only viable if** Week 2 Day 1 measures per-fold overhead < 1.1 K R1CS (a 9 × improvement on the Nova baseline that has not been empirically demonstrated). D2-c remains the cleanest CCS shape but is fold-overhead-bound.
+4. **LatticeFold+ + D4 + `secq256r1`** (no Poseidon re-instantiation) — most conservative path, no field-port required. Prover time ~5–10 × slower than #1 / #2 but memory wins remain ~30 ×.
 
-**Critical risk:** Goldilocks Poseidon re-instantiation (§7.2 of step-function design) — if it slips past Week 2, option #3 is the only deployable path, and the prover-time gain shrinks to ~2×.
+**Critical risks** (driven by literature survey):
+- **R1: Heterogeneous-branch NIVC layering.** Combining Neo/SuperNeo with Nebula or SuperNova is unpublished work. Recommendation #1 is research-grade, not engineering-grade.
+- **R2: Per-fold overhead constant unknown.** Neo/SuperNeo claim "logarithmic" overhead but report no absolute number; Nova baseline is ~10 K R1CS. Week 2 Day 1 must measure this — it dictates D2-c vs D3 vs D4 directly.
+- **R3: Goldilocks vs. Mersenne-31.** Ethereum PQ aggregation (leanSig, leanMultisig) is converging on **Mersenne-31 / KoalaBear**, not Goldilocks. Field choice cascades to Poseidon parameter selection.
 
 ---
 
@@ -115,26 +119,32 @@ All numbers are **projections from paper claims and structure**, not measurement
 - **Accumulator:** same shape, smaller norm growth.
 - **Maturity:** newer than LatticeFold, less battle-tested.
 
-### 3.3 Neo (ePrint 2025/294, Setty et al.)
+### 3.3 Neo (ePrint 2025/294, Nguyen & Setty)
 
-- **Commitment:** pay-per-bit Ajtai over a small prime field (Goldilocks).
-- **Per-fold prover cost:** dominated by small-field mults. For step witness ~10 FE: ~5 K Goldilocks-mults per fold.
-  - In native CPU ops: ~5 K × 20 ns = **~100 μs per fold**.
-- **Multi-fold (k-to-1):** Neo's natural mode. Per-k-fold cost ≈ k × single-fold cost (linear in k); critical advantage is critical-path depth reduction.
-- **Restriction:** **requires SIMD constraint structure** — i.e. each fold step must have identical CCS shape. **Forces flat-IVC uniform-step decomposition (our D2-c)** or padded multi-fold; can't do D5 heterogeneous-branch multi-fold.
+- **Commitment:** pay-per-bit Ajtai over a small prime field (Goldilocks, or Mersenne-61 "almost-Goldilocks" per §6.1).
+- **Per-fold prover cost — corrected 2026-05-22.** Literature only gives **recursion-circuit overhead in R1CS constraints**, not wall-clock μs. SuperNeo §1.1 D6 cites Nova at *"≈10,000 R1CS constraints"* per fold; Neo / SuperNeo claim *"logarithmic recursion overhead"* but report no absolute number. Earlier "100 μs per fold" estimate in this doc was a Goldilocks-mult-rate extrapolation with no paper backing — replace with **placeholder pending Week 2 Day 1 measurement**.
+- **Multi-fold (k-to-1):** Neo's natural mode, but quoted scope: *"folds multiple CCS instances at once"* (paper line 488) — meaning **k instances of the same CCS shape**. **Heterogeneous-branch capability is not native to Neo;** it requires layering SuperNova/NIVC (ePrint 2022/1758) or Nebula switchboard (ePrint 2024/1605).
+- **Restriction:** **requires SIMD constraint structure** — Neo §3 explicitly: *"This implicitly requires that one must have a 'data parallel' (or SIMD) constraint system."* Compatible with our D2-c uniform arity-2 step or D4 uniform per-XMSS-layer step; incompatible with naive D2 / D3 per-primitive heterogeneous folding.
 - **Accumulator size:** O(log N) growth; ~MB scale at N ≈ 4,000.
-- **Final SNARK:** Spartan2 over Goldilocks; paper benchmarks ~100 ms prover, ~30 KB proof for ~2²⁰ constraints.
-- **Maturity:** 2025 publication; reference implementation in development.
+- **Final SNARK:** Spartan2 over Goldilocks; paper benchmarks ~100 ms prover, ~30 KB proof for ~2²⁰ constraints (cited not measured here).
+- **Maturity:** 2025 publication; reference implementation status unknown to this survey.
 
-### 3.4 SuperNeo (ePrint 2026/242)
+### 3.4 SuperNeo (ePrint 2026/242, Nguyen & Setty)
 
-- **Removes Neo's SIMD restriction** — supports heterogeneous-branch multi-fold natively.
-- **Per-fold prover cost:** comparable to Neo (~100 μs per fold for typical step witness).
-- **Per-branch multi-fold:** D5+D6+D7 native; each branch's step shape can differ.
-- **Accumulator size:** O(log N) growth, similar to Neo.
+- **Removes Neo's SIMD restriction.** SuperNeo §1.1: *"Neo satisfies five of the six properties but requires SIMD constraint systems."* SuperNeo lifts this — supports general (non-SIMD) CCS instances in k-to-1 folding.
+- **But heterogeneous-branch step circuits are still not native.** SuperNeo's multi-folding "folds multiple CCS instances" (paper line 300) — meaning k arbitrary-shape instances at once, *not* k different-shaped step circuits combined into one accumulator. Heterogeneous-branch step capability (our D5) still requires SuperNova/NIVC (ePrint 2022/1758) or Nebula (ePrint 2024/1605) layered on top.
+- **Per-fold prover cost:** logarithmic recursion overhead per SuperNeo §1.1 D6, no absolute number reported. Pending Week 2 Day 1 measurement.
 - **Final SNARK:** Spartan2 over Goldilocks.
-- **"First to satisfy all six folding desiderata"** per paper abstract: (i) PQ, (ii) small-field, (iii) heterogeneous-branch multi-fold, (iv) transparent setup, (v) succinct accumulator, (vi) succinct final proof.
+- **"First to satisfy all six folding desiderata"** per paper abstract: (i) PQ, (ii) small-field, (iii) non-SIMD multi-fold, (iv) transparent setup, (v) succinct accumulator, (vi) succinct final proof. **Note: "heterogeneous-branch multi-fold" was the earlier claim in this doc — corrected to "non-SIMD multi-fold" per SuperNeo Figure 1.**
+- **XMSS motivation:** SuperNeo §1 explicitly names XMSS aggregation for Ethereum as a motivating use case (paper lines 65–78), but **does not build it**. Our Week 1 work is the first published step-function decomposition for SLH-DSA-128s under any folding scheme.
 - **Maturity:** 2026 publication; reference implementation may not yet exist publicly. **Highest implementation risk** of the schemes in this table.
+
+### 3.4a Heterogeneous-branch capability: SuperNova / Nebula (added 2026-05-22)
+
+For the multi-fold primary D5+D6+D7 (per-primitive heterogeneous leaves), the actual mechanism is:
+- **SuperNova / NIVC** (Kothapalli & Setty, ePrint 2022/1758): non-uniform IVC. Each fold step picks from a fixed set of step-circuit shapes via a selector. Used in Nebula and several Lurk Lab projects; **not in Sonobe** as of 2026-05 (Sonobe issue #144).
+- **Nebula switchboard** (Arun & Setty, ePrint 2024/1605): introduces a "switchboard" circuit that routes between branches. Used for memory-checking IVC.
+- Combining **Neo / SuperNeo k-to-1 lattice folding** with **NIVC** is plausible but **unpublished**. Treat as research-grade composition for Week 2.
 
 ### 3.5 Cyclo (ePrint 2026/359)
 
@@ -144,17 +154,22 @@ All numbers are **projections from paper claims and structure**, not measurement
 - **Multi-fold support:** unclear from abstract; likely flat-IVC only at first.
 - **Maturity:** 2026 publication; very newest; **less battle-tested than Neo/SuperNeo**.
 
-### 3.6 Comparative per-fold table
+### 3.6 Comparative per-fold table — **revised 2026-05-22**
 
-| Scheme | Field/ring | Per-fold time (proj.) | Multi-fold? | Restriction |
-|---|---|---|---|---|
-| LatticeFold | Cyclotomic ring | ~10 ms | flat IVC only | – |
-| LatticeFold+ | Cyclotomic ring | ~5–7 ms | flat IVC only | – |
-| **Neo** | Goldilocks | **~100 μs** | k-to-1 multi-fold | **uniform CCS (SIMD)** |
-| **SuperNeo** | Goldilocks | **~100 μs** | k-to-1 heterogeneous | none |
-| Cyclo | Cyclotomic ring | ~3–5 ms | flat IVC (likely) | – |
+All "per-fold time" numbers below are **retracted as load-bearing inputs to §5**. Literature gives recursion-circuit overhead in *R1CS constraints* (Nova ≈ 10K, lattice schemes claim "logarithmic" with no absolute number), not wall-clock. Earlier 100 μs / 10 ms etc. were Goldilocks-mult-rate or Rq-mult-rate extrapolations with no paper backing. **Week 2 Day 1 must measure these.**
 
-**Takeaway.** Neo / SuperNeo on Goldilocks are **30–100× faster per fold** than ring-based schemes. This is on top of the 20–50× field-op speedup. Combined: small-field multi-fold prover is potentially ~1,000× faster per fold than secq256r1-on-cyclotomic-ring.
+| Scheme | Field/ring | Per-fold overhead (R1CS) | Wall-clock (Goldilocks projection only) | Multi-fold? | Restriction |
+|---|---|---|---|---|---|
+| LatticeFold | Cyclotomic Rq (d=64, q≈2³⁰) | **unmeasured** (likely > Nova baseline due to ring-poly verification in-circuit) | unmeasured | flat IVC only | LatticeFold can NOT use Goldilocks (q-restriction) |
+| LatticeFold+ | Cyclotomic Rq | unmeasured | unmeasured | flat IVC only | same q-restriction as LatticeFold |
+| **Nova (curve-based, non-PQ; baseline only)** | Pasta curves | **≈ 10K R1CS** (SuperNeo §1.1 D6) | ~100 μs at Goldilocks mult rate (extrapolation only) | NIVC via SuperNova / Nebula | – |
+| **Neo** | Mersenne-61 / Goldilocks ("almost-Goldilocks") | **unmeasured** — claim *"logarithmic"* per SuperNeo §1.1 D6, *no absolute number* | unmeasured | k-to-1 on same-shape | **uniform CCS (SIMD)** |
+| **SuperNeo** | Mersenne-61 / Goldilocks | unmeasured — same "logarithmic" claim | unmeasured | k-to-1 on same-shape (not heterogeneous; needs Nebula/NIVC) | none |
+| Cyclo | Cyclotomic Rq | unmeasured | unmeasured | unclear | – |
+
+**Caveat on the 10K Nova baseline.** That number verifies one Pasta scalar mul + Poseidon sponge in-circuit. Lattice schemes verify Ajtai-commitment openings, sumcheck transcripts, and norm bounds in-circuit. **Whether lattice recursion is cheaper or more expensive than Nova's 10K is empirically unknown**: the agent's view is that ring-polynomial verification *in R1CS* is dense (potentially 30–50K R1CS), but Neo / SuperNeo's "logarithmic" claim suggests sub-Nova once the small-field optimization lands. **Treat 10K as a floor estimate, not a tight bound. Week 2 Day 1 must measure.**
+
+**Earlier takeaway retracted.** The earlier claim "Neo / SuperNeo on Goldilocks are 30–100 × faster per fold than ring-based schemes" rested on the extrapolated 100 μs number which had no paper backing. Until Week 2 Day 1 measurement, the cross-scheme ranking is **unknown**.
 
 ---
 
@@ -221,19 +236,23 @@ Total = step work + fold overhead × fold count. Single-core estimates unless no
 
 ❌ = worse than monolithic (16.2 s).
 
-### 5.2 Goldilocks (with Poseidon re-instantiation, ±25 %)
+### 5.2 Goldilocks (with Poseidon re-instantiation, ±50 %) — **wall-clock cells retracted, pending Week 2 Day 1 measurement**
 
-| Scheme | Step (D2-c flat) | Folds (D2-c flat) | **Total D2-c** | Step (D5+D6+D7 multi-fold, 4-core) | Folds (D5+D6+D7) | **Total multi-fold (4-core)** |
-|---|---|---|---|---|---|---|
-| LatticeFold | 155 ms | 43 s | ~43 s ❌ | – | – | n/a |
-| LatticeFold+ | 155 ms | 26 s | ~26 s ❌ | – | – | n/a |
-| Neo | 155 ms | 0.43 s | **~0.6 s** ✓ | – | – | n/a |
-| **SuperNeo** | **155 ms** | **0.43 s** | **~0.6 s** ✓ | **150–500 ms** | **0.43 s** | **~0.6–1.0 s** ✓ |
-| Cyclo | 155 ms | 17 s | ~17 s ❌ | – | – | n/a |
+**Earlier cells in this table assumed a 100 μs-per-fold extrapolation that this doc §3.6 has now retracted.** Until per-fold overhead is measured for the chosen scheme, the wall-clock numbers below are **not load-bearing**. They are retained as illustration of order-of-magnitude; replace with measurement on Week 2 Day 1.
 
-**Winner:** Neo or SuperNeo + D2-c on Goldilocks, ~0.6 s total prover (single-core). Multi-fold on SuperNeo is comparable on a 4-core mobile CPU but with the advantage of avoiding variable-arity padding and supporting heterogeneous branches.
+| Scheme | Step (D2-c flat, illustrative) | Per-fold overhead (R1CS) | D2-c total (illustrative) | D4 (per-XMSS-layer) | Multi-fold (D5+D6+D7) |
+|---|---|---|---|---|---|
+| LatticeFold | 155 ms × 4,273 | unmeasured (likely > 10 K) | > 26 s ❌ | ~3.7 s (D4 amortizes) | **BLOCKED** — LatticeFold can't use Goldilocks (q-restriction); see §3.6 |
+| LatticeFold+ | 155 ms × 4,273 | unmeasured | > 26 s ❌ | ~3.7 s | **BLOCKED** — same q-restriction; needs cyclotomic Rq Poseidon |
+| Neo | depends on per-fold overhead | "logarithmic" — unmeasured | **? — see §5.4** | **5.2 M R1CS total** (overhead-independent) | **BLOCKED** — Neo k-to-1 is same-shape only; needs Nebula/NIVC layered |
+| **SuperNeo** | depends on per-fold overhead | "logarithmic" — unmeasured | **? — see §5.4** | **5.2 M R1CS total** | **BLOCKED** — SuperNeo k-to-1 is same-shape only (non-SIMD); needs Nebula/NIVC for heterogeneous branches |
+| Cyclo | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured |
 
-**Loser:** ring-based schemes (LatticeFold/+, Cyclo) on flat IVC — fold overhead dominates because per-fold time is too high. Would need a coarser decomposition (D3 sub-layer, 669 folds, or D4 per-XMSS-layer, 9 folds) to compete.
+**Provisional winner: D4 (per-XMSS-layer) under any non-trivial per-fold overhead** (see §5.4 crossover). The D4 column's "5.2 M R1CS total" is what's actually defensible; converting to wall-clock requires the Goldilocks Poseidon Circom measurement (Week 2 Day 1).
+
+**Loser: D2-c (flat per-arity-2)** under Nova-class overhead (10 K R1CS per fold) — total work ~44 M R1CS, an order of magnitude worse than D4. **Only wins if Neo/SuperNeo deliver sub-1.1 K R1CS recursion overhead empirically.**
+
+**Multi-fold rows marked BLOCKED.** Heterogeneous-branch composition (D5+D6+D7) requires Nebula switchboard (ePrint 2024/1605) or SuperNova NIVC (ePrint 2022/1758) layered onto Neo / SuperNeo's k-to-1 same-shape folding. **This stack is unpublished and unimplemented** (Sonobe issue #144 confirms NIVC is missing across all major open-source folding libs as of 2026-05). Pursuing D5+D6+D7 in Week 2 is research-grade engineering, not prototype-grade.
 
 ### 5.3 Re-run: ring-based schemes on coarser decompositions
 
@@ -245,7 +264,23 @@ For LatticeFold+ (best ring-based), flip to D3 sub-layer (669 folds) or D4 per-X
 | D3 sub-layer (avg ~5K R1CS) | 669 | 6 ms | ~3.4 s | **~7.4 s** |
 | D4 per-XMSS-layer (~573K R1CS) | 9 | 6 ms | ~3.6 s | **~3.7 s** |
 
-LatticeFold+ + D4 → ~3.7 s prover. Faster than monolithic, slower than Neo/SuperNeo, but no Goldilocks dependency required if step circuit runs on the ring directly.
+LatticeFold+ + D4 → ~3.7 s prover. Faster than monolithic, slower than Neo/SuperNeo, but no Goldilocks dependency required if step circuit runs on the ring directly. **Caveat: LatticeFold+ cannot use Goldilocks for its lattice commitments** (q ≡ 1+2t mod 4t restriction); the `secq256r1` Poseidon-in-circuit + cyclotomic Rq lattice commitment is the actual setup.
+
+### 5.4 D2-c vs. D4 crossover sensitivity — added 2026-05-22
+
+The choice between **D2-c (per-arity-2 chain, 4,273 folds × 240 R1CS step)** and **D4 (per-XMSS-layer, 9 folds × 573 K R1CS step)** is dominated by **per-fold recursion-circuit overhead**, which is the most unsettled input to this cost model. Crossover under different overhead assumptions:
+
+| Per-fold overhead (R1CS) | D2-c total | D4 total | Winner | Comment |
+|---|---|---|---|---|
+| **12** (log₂(4,273) ≈ 12, if Neo "logarithmic" claim taken literally) | 1.08 M | 5.16 M | **D2-c by 4.8 ×** | optimistic Neo/SuperNeo |
+| **120** (10× log) | 1.54 M | 5.16 M | **D2-c by 3.4 ×** | optimistic lattice |
+| **1.1 K** (crossover) | 5.73 M | 5.17 M | **tie** | break-even threshold |
+| **10 K** (Nova-class baseline, SuperNeo §1.1 D6 quote) | 43.7 M | 5.25 M | **D4 by 8.3 ×** | conservative |
+| **50 K** (lattice with Rq-verification in-circuit ceiling) | 214 M | 5.65 M | **D4 by 38 ×** | pessimistic |
+
+**Reading.** D2-c is the right call **only if** per-fold overhead is **< 1.1 K R1CS** — a 9 × improvement on Nova's published 10K baseline. Neo / SuperNeo *claim* "logarithmic" overhead, but this is **not empirically measured** in any published source. **D4 wins under every assumption ≥ 1.1 K R1CS per fold, making it the conservative pick.**
+
+**Implication for §1 + scheme_selection §3.** The D4 conservative-lead recommendation is correct **under the Nova-class anchor**. If Week 2 Day 1 measurement shows Neo/SuperNeo deliver sub-1 K R1CS overhead, **the recommendation flips back to D2-c**. Week 2 sign-off must condition on the measurement.
 
 ---
 
@@ -347,20 +382,26 @@ Which inputs, if wrong by 2×, change the recommendation?
 | Verifier time | 9.5 s | 0.1–3 s | 3–100× |
 | Setup size (PK) | 2.37 GB | 20–200 MB | 12–120× |
 
-### 9.2 vs. OpenAC ECDSA-Spartan2 baseline
+### 9.2 vs. OpenAC ECDSA-Spartan2 baseline — **soft comparison, not apples-to-apples**
 
-From the broader research context (per README:62): ecdsa-spartan2 (jwt_1k) is 76 KB proof, **1.1 s prove on M5/24 GB**, ~257 MB peak RSS.
+From `README.md:61-62`: ecdsa-spartan2 (jwt_1k) is **76 KB proof, 1.1 s prove on M5/24 GB**, ~257 MB peak RSS.
 
-| Metric | ECDSA-Spartan2 (incumbent) | SLH-DSA-128s monolithic | SLH-DSA-128s + folding (proj.) | PQ regression |
+**Important caveats** before comparing to our SLH-DSA numbers (added 2026-05-22):
+
+- **Hardware delta:** ECDSA numbers are on **M5** (Apple Silicon, ~2024 gen); our SLH-DSA monolithic is on **M3** (Apple Silicon, ~2023 gen). Geekbench public data puts M5/M3 single-core integer-mult at ~1.3–1.5 × in M5's favour.
+- **Hash function delta:** ECDSA-Spartan2 uses **SHA-256** in-circuit; our Poseidon SLH-DSA circuit uses **non-standard BN254-constants-mod-`p_secq256r1` Poseidon** — these are different hash functions with very different R1CS profiles. A like-for-like ECDSA-Poseidon variant has not been benchmarked.
+- **Security level:** ECDSA jwt_1k targets classical 128-bit; SLH-DSA-128s targets NIST Category 1 (~128-bit classical, ~64-bit quantum). Apples-to-apples requires comparing PQ-vs-PQ or classical-vs-classical, not mixed.
+
+| Metric | ECDSA-Spartan2 (M5, SHA-256) | SLH-DSA-128s monolithic (M3, Poseidon) | SLH-DSA-128s + folding (M3, proj.) | Comparison status |
 |---|---|---|---|---|
-| Prover time | 1.1 s | 16.2 s (15×) | 0.6–1.0 s | **~equal** or **slightly faster** ✓ |
-| Peak RSS | 257 MB | 5.41 GB (21×) | 30–250 MB | **~equal** ✓ |
-| Proof size | 76 KB | 208.8 KB (2.7×) | 30–500 KB | 0.4–7× (Neo/SuperNeo: ~equal) |
-| Verifier | similar | 9.5 s | 0.1–3 s | possibly **faster** ✓ |
+| Prover time | 1.1 s | 16.2 s (15×) | **? — pending Week 2 measurement** | **Not apples-to-apples** (hardware + hash + sec level differ) |
+| Peak RSS | 257 MB | 5.41 GB (21×) | 30–250 MB (folding loop only; finisher peak may add ~GB — see §6.3) | Folding likely matches; full picture needs finisher measurement |
+| Proof size | 76 KB | 208.8 KB (2.7×) | 30–500 KB (Neo/SuperNeo Spartan2 finisher) | Same order of magnitude |
+| Verifier | (similar) | 9.5 s | 0.1–3 s (small-field Spartan2 finisher) | Potentially faster, but unmeasured |
 
-**Key finding.** With folding + Goldilocks, **PQ SLH-DSA-128s can match or beat the classical ECDSA baseline on every metric.** Without folding, PQ is 15–21× worse — the case-for-action for folding is overwhelming.
+**Honest finding:** With folding + Goldilocks, **PQ SLH-DSA-128s is in the same order of magnitude as the classical ECDSA baseline on memory and proof size**. Prover time matching requires the §5.4 D2-c-wins regime (sub-1.1 K R1CS per-fold overhead), which is unmeasured. **Claim "matches or beats on every metric" is overclaim until normalized rerun on identical hardware with identical hash function.**
 
-Without Goldilocks (secq256r1-only folding path #3), prover time is ~3–4 s vs. ECDSA's 1.1 s — still a 3× regression but **fits the memory budget**, making client-side proving feasible. This is the conservative fallback.
+The case-for-action remains: **folding shrinks memory by 20–100 ×** (the binding mobile constraint), which is the threshold question. Wall-clock parity with ECDSA is a *bonus*, not a prerequisite.
 
 ---
 

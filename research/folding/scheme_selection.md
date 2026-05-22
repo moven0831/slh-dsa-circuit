@@ -44,41 +44,57 @@ Score on each criterion: ✓ (meets), ~ (marginal / requires fallback), ✗ (fai
 
 ---
 
-## 3. Primary selection
+## 3. Primary selection — revised 2026-05-22 after literature survey
 
 ### 3.1 Selected configuration
 
-> **Primary: configuration A — SuperNeo + D5+D6+D7 multi-fold + Goldilocks Poseidon + Spartan2 finisher over Goldilocks.**
+> **Primary (conservative): configuration A' — SuperNeo or Neo + D4 (per-XMSS-layer) + Goldilocks Poseidon + Spartan2 finisher over Goldilocks.**
+>
+> **Aggressive alternative: configuration A — SuperNeo + Nebula switchboard NIVC + D5+D6+D7 multi-fold + Goldilocks Poseidon + Spartan2 finisher.** *Only* if Week 2 Day 1 confirms the Nebula/SuperNeo composition is implementable in the prototype window.
 
-### 3.2 Why this wins
+### 3.2 Why D4 is the new conservative lead (was D5+D6+D7 in Week 1 Day 5)
 
-- **Memory:** projected 50–250 MB peak, ~30× below the 1 GB binding constraint and 20–100× below the monolithic baseline. Comfortably mobile-deployable.
-- **Prover wall-clock:** 0.6–1.0 s on a 4-core mobile CPU, **at parity with or faster than the ECDSA-Spartan2 incumbent (1.1 s on M5).** Closes the PQ prover-time gap entirely.
-- **Proof size:** 30–50 KB (small-field Spartan2 over Goldilocks), 4× smaller than monolithic and competitive with the ECDSA-Spartan2 baseline (76 KB).
-- **Verifier:** 100–500 ms on Goldilocks Spartan2 — feasible on mobile-class relying parties (retail POS terminals).
-- **Step-function fit:** SLH-DSA-128s's natural tree structure (14 FORS trees × 12 H + 7 HT layers × 35 WOTS chains) maps 1:1 onto SuperNeo's k-to-1 heterogeneous multi-fold. No variable-arity padding, no flat-IVC linearization tax.
+**The literature survey (2026-05-22) surfaced two facts that flip the primary recommendation:**
 
-### 3.3 Fallback ladder
+1. **Per-fold recursion-circuit overhead is ≈ 10,000 R1CS** for Nova-class folding schemes (SuperNeo §1.1 D6; `oskarth/nova-bench`). Neo / SuperNeo claim "logarithmic" overhead but report no absolute number. Under the Nova baseline, total prover work is fold-overhead-bound for fine-grained decompositions:
 
-If primary configuration A is blocked, switch to the next viable in order:
+   | Decomposition | Folds | Step R1CS | Step + 10K-overhead total |
+   |---|---|---|---|
+   | D2-c | 4,273 | 240 | **43.7 M R1CS** |
+   | D3 | 669 | ≈ 5,000 | 10.0 M R1CS |
+   | **D4** | **9** | **573,000** | **5.2 M R1CS — 8.4 × better than D2-c** |
 
-1. **A → B (Neo + D2-c + Goldilocks)** if SuperNeo reference impl is not usable in Week 2.
-   - Loses heterogeneous-branch multi-fold; gains scheme maturity.
-   - D2-c (arity-2 chain) is uniform-CCS, which Neo's SIMD restriction tolerates.
-   - Wall-clock penalty: ~0 (still ~0.6 s).
-   - **Trigger:** Day-2 of Week 2 if SuperNeo impl unavailable.
+2. **Neo / SuperNeo do not natively support heterogeneous-branch step circuits.** Their k-to-1 multi-folding requires the k folded instances to share the same CCS shape (Neo §3 SIMD restriction; SuperNeo Fig 1). The multi-fold story for SLH-DSA's tree-shaped workload requires layering **SuperNova / NIVC** (ePrint 2022/1758) or **Nebula switchboard** (ePrint 2024/1605) on top — *unpublished* composition with no open-source implementation (Sonobe issue #144 tracks NIVC support as not-yet-implemented across all major folding libraries as of 2026-05).
 
-2. **B → E (Neo + D2-c + secq256r1)** if Goldilocks Poseidon re-instantiation slips.
-   - Wall-clock penalty: ~5× (0.6 s → 3.4 s).
-   - Still under the 5-s acceptable-to-ship ceiling.
-   - **Trigger:** Day-3 of Week 2 if Goldilocks Poseidon prototype not benchmarked.
+D4 sidesteps both issues — uniform step shape (no NIVC needed), tiny fold count (overhead vanishes).
 
-3. **E → C (LatticeFold+ + D4 + secq256r1)** if Neo reference impl also has gaps.
-   - Wall-clock penalty: ~6× (0.6 s → 3.7 s).
-   - More mature reference implementation; lower implementation risk.
-   - **Trigger:** Day-4 of Week 2 if neither Neo nor SuperNeo is usable.
+### 3.2a Why D5+D6+D7 multi-fold is still listed (aggressive alternative)
 
-**No-Goldilocks worst case (C):** still beats the binding memory constraint by 20×, and matches the broader research plan's "PQ-feasible" bar (the goal was demonstrate-it, not match ECDSA wall-clock).
+If Week 2 Day 1 measurement shows Neo/SuperNeo recursion overhead is **sub-1 K R1CS** (a 10 × improvement on Nova baseline), the math flips again and per-primitive granularity wins. The multi-fold primary remains relevant for *parallelism* (per-branch folding on multi-core CPUs) once the NIVC layering issue is resolved.
+
+### 3.3 Fallback ladder (revised)
+
+If primary configuration A' is blocked, switch in order:
+
+1. **A' → B' (LatticeFold+ + D4 + Goldilocks Poseidon)** if Neo/SuperNeo reference impls are not usable in Week 2.
+   - LatticeFold+ over cyclotomic rings is more mature than Neo/SuperNeo; trade-off is slower per-fold (Rq-multiplication vs. small-field).
+   - Wall-clock penalty: ~5–10 × vs. Neo/SuperNeo on Goldilocks per cost_model §5.
+   - **Trigger:** Day 1 of Week 2 if neither Neo nor SuperNeo reference impl is usable.
+
+2. **B' → C' (LatticeFold+ + D4 + `secq256r1`)** if Goldilocks Poseidon re-instantiation slips.
+   - No Poseidon redesign needed; uses existing `circuits/poseidon/hashes.circom`.
+   - Memory wins still ≈ 20 × vs. monolithic Spartan2 baseline.
+   - **Trigger:** Day 2 of Week 2 if Goldilocks Poseidon prototype not benchmarked.
+
+3. **C' → D' (LatticeFold+ + D3 sub-layer + `secq256r1`)** if D4's step R1CS (573 K) blows the prototype's memory ceiling.
+   - Trades step size for fold count (669 folds × 5 K step).
+   - **Trigger:** Day 3 of Week 2 if D4 step prototype OOMs.
+
+4. **D' → original Spartan2 monolithic baseline** if none of the above is achievable.
+   - Re-evaluate the entire folding direction.
+   - **Trigger:** Day 4 if no folding prototype works end-to-end.
+
+**Configuration A (multi-fold) is reserved for parallel pursuit if there's bandwidth — not the primary path.**
 
 ---
 
@@ -122,16 +138,23 @@ If primary configuration A is blocked, switch to the next viable in order:
 
 ---
 
-## 6. Sign-off requirements
+## 6. Sign-off requirements (actionable, revised 2026-05-22)
 
-Before Week 2 begins, the following must be confirmed:
+Before Week 2 Day 1 begins, the following must each have: **Decision**, **Owner**, **Trigger**, **Evidence-artifact**, and a Date filled in. Replace the `<>` placeholders. Items missing any of the four fields **block Week 2**.
 
-- [ ] **Stakeholder approval** on configuration A as primary, with fallback ladder B → E → C.
-- [ ] **Week 2 owner** for the SuperNeo reference-impl survey (Day 1 of Week 2).
-- [ ] **Week 2 owner** for Goldilocks Poseidon re-instantiation in `circuits/poseidon/poseidon_wrap.circom` (Days 1–2 of Week 2).
-- [ ] **External cryptographer engaged** for Poseidon parameter review (parallel track; not a Week 2 blocker for prototype, only for production).
-- [ ] **Verifier device class confirmed** for the CSP relying party — needed to set the verifier-cost bar (currently assumed mobile-class).
-- [ ] **Final SNARK choice locked** to Spartan2 over Goldilocks; fallback to Spartan2 over Pallas/Vesta if Goldilocks finisher impl is unavailable.
+| # | Decision | Owner | Trigger | Evidence artifact | Date |
+|---|---|---|---|---|---|
+| 1 | Approve D4 conservative primary + D2-c conditional alternative (gated on Week 2 Day 1 per-fold-overhead measurement); fallback ladder A' → B' → C' → D'. | `<PI / project lead>` | Reviewer reading EXEC_SUMMARY + this §3 confirms. | `EXEC_SUMMARY.md` approved-by line filled in. | `<YYYY-MM-DD>` |
+| 2 | Name Week 2 engineer for SuperNeo / Neo reference-impl survey + per-fold-overhead micro-bench (Day 1 deliverable). | `<EM>` | Week 2 Day 0. | `research/folding/week2_prereqs.md` lists owner. | `<YYYY-MM-DD>` |
+| 3 | Name Week 2 engineer for Goldilocks Poseidon Circom re-instantiation in `circuits/poseidon/poseidon_wrap.circom` (Days 1–2 deliverable). | `<EM>` | Week 2 Day 0. | `week2_prereqs.md` lists owner + Poseidon variant pin (Plonky2 commit SHA). | `<YYYY-MM-DD>` |
+| 4 | External cryptographer engagement plan: named candidate org(s), scope-of-work (Poseidon constants + Merkle-tree-T_k variant + Module-SIS params), budget envelope, target dates relative to deploy. | `<PI>` | End of Week 2 (parallel; not a Week 2 prototype blocker, but a production deploy blocker). | `research/folding/cryptographer_engagement.md` drafted. | `<YYYY-MM-DD>` |
+| 5 | Confirm verifier device class (mobile / desktop) for the CSP relying party. Cascades to scheme + field choice — if mobile, Goldilocks Spartan2 finisher is required; if desktop, slack. | `<product lead>` | Week 2 Day 0. | One-line decision recorded in `EXEC_SUMMARY.md`. | `<YYYY-MM-DD>` |
+| 6 | Final SNARK choice locked to Spartan2 over Goldilocks (default). Fallback: Plonk-style with FRI if Goldilocks Spartan2 finisher impl is unavailable in Week 2 timeframe. | `<scheme owner>` | Week 2 Day 1 after SuperNeo survey. | `scheme_selection.md` updated with chosen finisher + commit SHA of reference impl. | `<YYYY-MM-DD>` |
+| 7 | XMSS-track coordination: confirm shared scheme + shared field + shared Poseidon variant (or document explicit divergence). Same Poseidon halves the integration work. | `<XMSS lead + SLH-DSA lead>` | Week 2 Day 0. | Joint memo at `research/folding/xmss_handoff.md`. | `<YYYY-MM-DD>` |
+
+**Status meta-fields:**
+- If any row is incomplete by Week 2 Day 0 EOD, **Week 2 starts in NEEDS-CLOSURE state**, not READY.
+- The fallback ladder (`§3.3`) ensures Week 2 has a path forward even if individual items slip — but the *initial* scheme choice is gated on items 1, 2, 6 being filled.
 
 ---
 
@@ -156,7 +179,26 @@ Before Week 2 begins, the following must be confirmed:
 
 **Day 6–7:**
 - Write-up: prototype repo, measured numbers vs. projections, recommendation memo for production commitment.
-- Compare to ECDSA-Spartan2 baseline on identical hardware.
+- Compare to ECDSA-Spartan2 baseline on identical hardware **with identical hash function** (per `cost_model.md §9.2` caveat — the existing comparison is M5/SHA-256 vs. M3/Poseidon, not apples-to-apples).
+
+### 7.7 Week 2 acceptance gate (Day-7 deliverable)
+
+A reviewer reading the Week 2 output should be able to confirm **all** of the following before declaring Week 2 successful:
+
+| # | Acceptance criterion | Measurement method |
+|---|---|---|
+| 1 | End-to-end SLH-DSA-128s verify proved under the chosen (scheme × decomposition × field) | Running prototype produces a valid folded accumulator + closing SNARK proof |
+| 2 | Prover wall-clock ≤ **2.0 s** on M3/24 GB single-core | Measured with `/usr/bin/time -v` or equivalent |
+| 3 | Peak prover RSS ≤ **1 GB** | `/usr/bin/time -v` Maximum RSS field |
+| 4 | Proof size ≤ **500 KB** | File size of the closing SNARK output |
+| 5 | Per-fold recursion-circuit overhead empirically measured for the chosen scheme | Reported in `research/folding/week2_results.md` with reproducer command |
+| 6 | D2-c vs. D4 decision locked with evidence (matches or revises the conservative recommendation in `§3.2`) | Decision section in `week2_results.md` cites the measured overhead and references `cost_model.md §5.4` crossover |
+| 7 | All `cost_model.md §5.2` projections either validated to within 2 × or replaced with measured numbers | Side-by-side projected-vs-measured table in `week2_results.md` |
+| 8 | If multi-fold attempted: explicit reproducer for the Nebula/NIVC composition + measured per-branch parallelism factor | Repo + benchmark; OR a "deferred" note with rationale |
+| 9 | `yarn verify:folding` still passes (or has been updated with explicit deltas explaining drift) | Verifier run; `git diff scripts/verify_perm_counts.py` if updated |
+| 10 | Updated Week 3+ recommendation: ship-it / iterate / abandon | Memo in `week2_results.md` |
+
+**If criteria 1–4 are not met but the prototype runs:** Week 2 is *NOT* a failure — it produces empirical numbers that flip the recommendation. The follow-up is Week 3 with the corrected primary, not "go back to monolithic." **The only Week 2 failure mode is no prototype at all by Day 7.**
 
 ---
 

@@ -12,8 +12,10 @@
 
 - **3,929 SLH primitive calls** per SLH-DSA-128s verify (3,689 F + 231 H + 1 T_k + 7 T_len + 1 H_msg) ⇒ **4,273 Poseidon permutations** (binary `PoseidonReduce` expansion) ⇒ **3,992,159 R1CS** measured in `main_poseidon` (--O2, `secq256r1`).
 - **Monolithic Spartan2 baseline** (companion repo, M3/24GB, T256HyraxEngine): 16.2 s prove / 5.41 GB peak / 208.8 KB proof / 2.37 GB proving key. **Memory is the binding constraint** for client-side proving — folding must shrink the peak RSS, not just the wall-clock.
-- **Recommended primaries for Day 3 cost model:**
-  - **Flat-IVC primary:** D2-c — *per-primitive step circuit with variable-arity `PoseidonReduce`s re-expressed as arity-2 Poseidon chains* (Sec 7.1 option c). Effective fold count **4,273**, uniform arity-2 step **= 240 R1CS measured** (`bench_poseidon_reduce2`, `secq256r1`, --O2) / **≈ 120 R1CS projected ±25 %** (Goldilocks), state width ≈ 16 FE. **Total D2-c step work ≈ 1.03 M R1CS, a 74 % reduction vs. the 3.99 M monolithic.**
+- **Recommended primaries for Day 3 cost model (provisional — see §8 + the per-fold overhead caveat below):**
+  - **Conservative flat-IVC primary: D4 — per-XMSS-layer** (one HT layer / step, 9 fold steps, ≈ 573 K R1CS per step). Lowest total work when per-fold recursion overhead is ≈ 10 K R1CS (the Nova-class baseline, per SuperNeo §1.1 D6 citing Nova ≈ 10 K R1CS recursion-circuit constraints, and `oskarth/nova-bench` empirical). **Total D4 work ≈ 5.2 M R1CS** vs. D2-c's ≈ 43.8 M under the same overhead.
+  - **Aggressive flat-IVC primary: D2-c — per-primitive arity-2 Poseidon chain** (4,273 folds, uniform step = 240 R1CS measured by `bench_poseidon_reduce2`). Only competitive if the lattice scheme's per-fold overhead is *much* smaller than Nova's — Neo/SuperNeo claim *"logarithmic recursion overhead"* but report no absolute number. **Pick this only if Week 2 Day 1 measurement shows per-fold overhead ≪ 1 K R1CS.**
+  - **Multi-fold primary: D5+D6+D7 + Nebula switchboard (or SuperNova NIVC) over Neo/SuperNeo.** Neo/SuperNeo natively support k-to-1 folding of the *same* CCS shape; heterogeneous-branch capability requires layering Nebula (ePrint 2024/1605) or SuperNova (ePrint 2022/1758) on top. **No published implementation of this stack exists** (Sonobe issue #144: non-uniform IVC unimplemented across all open-source folding libraries as of 2026-05). Highest impl risk.
   - **Multi-fold primary:** D5+D6+D7 — *per-primitive heterogeneous leaves, per-tree/per-WOTS-pk mid folds, single top fold* (Sec 4b). Maps SLH-DSA's natural tree structure 1:1 onto Neo/SuperNeo's k-to-1 + heterogeneous-branch shape.
 - **Variable-arity reduces** (`SlhTk` = 14→1, `SlhTlen` = 35→1, `SlhHMsg` = 64→1) are the central design issue. Resolution: arity-2 chain for flat IVC (uniform step), native heterogeneous arity for multi-fold (no padding, no chain overhead). Both routes are mapped in Sec 7.1.
 - **Largest open issue:** Goldilocks Poseidon re-instantiation. Current Poseidon uses circomlib BN254 constants mod `p_secq256r1` (non-standard, `CLAUDE.md:123-125`). Goldilocks projection here carries ±25% uncertainty; if Day 3 is sensitive to that band, allocate Day 4 to a quick Goldilocks Poseidon prototype.
@@ -75,11 +77,24 @@ Source: `README.md:54-65` (companion repo `moven0831/slh-dsa-128s-poseidon-bench
 
 **Critical observation:** setup-phase peak RSS is 10.45 GB — already past the OOM ceiling on a 24 GB device with any concurrent app load. Prove-phase peak is 5.41 GB, separately past the mobile ceiling (~1 GB working set). **Both phases need folding-class reshaping for a mobile target.** Schemes with transparent setup (LatticeFold, Neo, SuperNeo, Cyclo — all in scope here) sidestep the 10.45 GB number by deriving public parameters from a seed, so the cost-model only needs to compare against the prove-phase 5.41 GB. The case-for-action is memory, not wall-clock — folding lets the prover hold one step circuit (≈KB) plus the running accumulator (≈MB) in memory at a time, instead of the full witness + setup data (≈3.86 M wires × 32 B for the witness plus ~GB of commitment-tree intermediate state under Hyrax PCS).
 
-### 2.4 Poseidon-variant caveat
+### 2.4 Poseidon-variant caveat (two layers of non-standardness)
 
-Per `CLAUDE.md:123-125` and `README.md:11,132-134`: this circuit uses **circomlib BN254 Poseidon constants mod `p_secq256r1`**. The construction is non-standard — R1CS structure (and thus all R1CS numbers above) is unchanged from the BN254 instance, but **security analysis does not transfer**. These are benchmark numbers only.
+Per `CLAUDE.md:123-125` and `README.md:11,132-134`: this circuit's hash construction deviates from FIPS 205 in **two stacked ways** that any external cryptographer review will surface:
 
-The Goldilocks projections in Section 5 assume a re-instantiation under a Goldilocks-safe Poseidon variant (Plonky2-style: ~8 full + ~22 partial rounds at t=12). Section 7.2 flags the re-instantiation cost.
+**Layer 1: Field-deviated Poseidon constants.** The circuit uses **circomlib BN254 Poseidon constants mod `p_secq256r1`**. R1CS structure (and thus all R1CS numbers above) is unchanged from the BN254 instance, but security analysis does *not* transfer — round-count tuning, MDS branch number, and S-box differential trails are all field-specific. These are **benchmark numbers, not deployable parameters**.
+
+**Layer 2: T_k / T_len / H_msg are *already* Merkle-tree compressions, not single-call FIPS 205 T hashes.** Inspecting `circuits/poseidon/hashes.circom:115,153,192`:
+
+- FIPS 205 §4.4 / §11.2.2: T_k is **one** keyed PRF call: `T_k(PK.seed, ADRS, M₁ || … || M_k) = T(PK.seed, ADRS, concat)` with a single Poseidon over the concatenated input.
+- This codebase: `SlhTk = PoseidonReduce(14) + Poseidon(10)` — i.e. a **binary Merkle tree of Poseidon(2) calls** followed by a final mix. Same for `SlhTlen` (35-leaf Merkle) and `SlhHMsg` (64-leaf Merkle + 2 mixes).
+
+**Implication for D2-c (Sec 7.1 option c) — and for the project as a whole.** Re-expressing reduces as arity-2 chains during folding does **not** introduce a new deviation: the underlying circuit *already* uses a Merkle-tree compression. But this means:
+
+1. The circuit is **not implementing FIPS 205 SLH-DSA-128s exactly** — it implements an SLH-DSA-shaped scheme with non-spec T_k / T_len / H_msg.
+2. Collision resistance of a Merkle-tree of Poseidon(2) is well-understood; but the SLH-DSA security proof models T as a **tweakable PRF with specific input/output domain separation per (PK.seed, ADRS) tweak**. The Merkle-tree variant only applies the tag at the final mix, *not* at every interior Poseidon(2) node — internal collisions across primitives (F / H / T_k / T_len / H_msg) are not ruled out by the current ADRS-encoding.
+3. **External cryptographer review must explicitly bless this Merkle-tree T_k variant**, separately from any review of Poseidon constants.
+
+The Goldilocks projections in Section 5 assume a re-instantiation under a Goldilocks-safe Poseidon variant (Plonky2 t=12, x⁷ S-box, 8 + 22 rounds — see §5.1 for the corrected R1CS projection). Section 7.2 flags field-choice trade-offs. **Neither addresses the FIPS 205 T-variant deviation; that is a separate Week 2 sign-off item.**
 
 ---
 
@@ -162,9 +177,15 @@ State carried: running root + indices ≈ 16 FE.
 
 **D4 — Per-XMSS-layer (one HT layer per step, dedicated FORS and H_msg steps).** Step circuit handles a full XMSS subtree verification: 35 WOTS chains + 1 T_len compress + 9 Merkle hashes = 573 Poseidon perms. State carried: 16 FE (xmss_root forward + tree_idx + leaf_idx). Fold count: **9** (1 H_msg + 1 FORS + 7 HT layers).
 
-### 4b. Multi-fold (hierarchical, Neo / SuperNeo-style)
+### 4b. Multi-fold (hierarchical) — Neo / SuperNeo k-to-1 + Nebula / SuperNova NIVC
 
-Neo / SuperNeo support k-to-1 folding (multiple instances merged at once) **and** heterogeneous branches (different step-circuit shapes folded together at the same level). SLH-DSA-128s verification is naturally tree-shaped — 14 FORS trees with k=14 leaves each, 7 HT layers each with 35 WOTS chains — which maps 1:1 onto multi-fold.
+**Correction (2026-05-22 survey).** Neo (ePrint 2025/294) and SuperNeo (ePrint 2026/242) support **k-to-1 multi-folding of the *same* CCS instance shape** — k instances of one step circuit collapsed into one accumulator per fold. They do **not** natively support heterogeneous-branch step circuits (different shapes folded into one accumulator at the same level). That capability requires layering one of:
+- **SuperNova / NIVC** (Kothapalli & Setty, ePrint 2022/1758) — non-uniform IVC: each fold step can pick from a fixed set of step circuit shapes.
+- **Nebula switchboard** (Arun & Setty, ePrint 2024/1605) — a "switchboard" circuit that routes between heterogeneous branches.
+
+Combining Neo/SuperNeo k-to-1 with SuperNova/Nebula NIVC for a tree-shaped workload is plausible but **unpublished and unimplemented** in any open-source folding library as of 2026-05 — Sonobe issue [#144](https://github.com/privacy-scaling-explorations/sonobe/issues/144) explicitly tracks this as TODO. Treat D5+D6+D7 as **the most aggressive option carrying the highest implementation risk**.
+
+SLH-DSA-128s verification is naturally tree-shaped — 14 FORS trees with k=14 leaves each, 7 HT layers each with 35 WOTS chains — which maps 1:1 onto a hypothetical multi-fold with heterogeneous branches.
 
 **D5 — Leaf level: per-primitive heterogeneous step circuits.** Grouping by **Poseidon arity** (the shape that determines step-circuit CCS), there are **4 distinct branches**, with instance counts deriving from FIPS 205 §11.2.2:
 
@@ -190,6 +211,21 @@ Tk-mix and Tlen-mix fold into the F-step branch because they share Poseidon(10) 
 
 **Critical-path depth:** With native-k folds, multi-fold is **3 levels deep** (leaf → mid → top), versus flat IVC's 4,273-step linear chain. Same total prover work, but the tree shape enables per-branch parallelism on the prover and avoids the variable-arity padding tax.
 
+### 4c. Prior art on hash-based-signature aggregation (added 2026-05-22)
+
+The 2026-05 survey (`research/folding/REVIEWER_GUIDE.md` for full literature dump) found **no published end-to-end folding-scheme verifier for SLH-DSA / SPHINCS+ / XMSS / LMS**. The closest neighbours all pick a different proof system:
+
+| Project | Hash-based-sig handled | Proof system | Why not folding |
+|---|---|---|---|
+| **HAPPIER** (ASIACRYPT 2025) | XMSS aggregation | **Risc0 STARK zkVM** | Recursion is via STARK proof composition, not native folding step circuits |
+| **leanSig / Hash-Based Multi-Sigs PQ Ethereum** (ePrint 2025/055) | XMSS-variants for Ethereum aggregate signatures | **Plonky3 monolithic SNARK** (custom circuit) or **STARK zkVM** | Quote (§8.3): *"two main approaches: (1) Custom Circuit Approach… (2) zkVM-Based Approach"* — folding not in the options |
+| **leanMultisig** (GitHub `leanEthereum/leanMultisig`) | PQ multi-sig aggregation | **WHIR + SuperSpartan AIR + Logup** (zkVM) | Same direction as leanSig |
+| **SuperNeo** §1 motivation (ePrint 2026/242) | XMSS for Ethereum *named as use case* | (motivation only) | Paper does not construct it; defers to future work |
+| **Sonobe `sha256.rs` example** | Hashing only, not signatures | Nova/HyperNova/ProtoGalaxy | Folds one SHA-256 hash per step; no signature-level wrapping |
+| **awesome-folding** (lurk-lab) | — | — | No entries on hash-based-signature folding |
+
+This Week 1 design appears to be **the first published step-function decomposition for SLH-DSA-128s under a folding scheme**. The conservative reading: our shape is in line with industry conventions (per-primitive granularity matches Sonobe's `sha256.rs`; small-field commitment matches Neo/SuperNeo), but the *domain* (SLH-DSA verification, with its variable-arity Tk/Tlen/HMsg reduces) is unmapped. Section 7.1's arity-2 chain technique addresses a gap no prior folding paper has had to solve.
+
 ### 4.6 Where these boundaries fall in code
 
 | Decomposition | Code-boundary anchor |
@@ -207,9 +243,24 @@ Tk-mix and Tlen-mix fold into the F-step branch because they share Poseidon(10) 
 
 ## 5. Cost table
 
-### 5.1 Goldilocks projection methodology
+### 5.1 Goldilocks projection methodology — corrected 2026-05-22
 
-> **Goldilocks Poseidon** (e.g. Plonky2 t=12 with ~8 full + ~22 partial rounds) has roughly **0.4–0.6× the round count** of the current circomlib BN254 Poseidon (~8 full + ~57 partial rounds at comparable widths). R1CS row count per perm scales approximately linearly in round count (Circom partial-round optimization compresses but does not eliminate the cost difference). **Projected Goldilocks R1CS / perm ≈ 0.5 × secq256r1 measured ± 25%.** Mark all Goldilocks columns **PROJECTED ± 25%** — the Day 3 cost model must propagate this uncertainty. The 25% band tolerates (i) different Goldilocks Poseidon variants (Plonky2 vs. Poseidon2 vs. Tip5), (ii) Circom's per-field partial-round optimization differences, and (iii) the small contribution of byte-packing (Num2Bits) constraints whose cost is largely field-independent.
+> **Earlier 0.5 × estimate retracted.** Naive "rounds ratio" (Plonky2 Goldilocks 30 rounds vs. circomlib BN254 68 rounds at t=12) gave 0.46 × → quoted as "≈ 0.5 × ± 25 %". **This ignores the S-box cost difference**: Goldilocks Poseidon uses **x⁷ (4 R1CS mults per S-box)**; circomlib BN254 Poseidon uses **x⁵ (3 R1CS mults per S-box)**. Total R1CS per perm at t=12:
+>
+> - BN254 Poseidon (x⁵, 8 full + 60 partial): (8·12 + 60·1) × 3 = **468 R1CS**
+> - Plonky2 Goldilocks Poseidon (x⁷, 8 full + 22 partial): (8·12 + 22·1) × 4 = **472 R1CS**
+>
+> **Within ±2 % — *not* a 2 × speedup.** The Goldilocks advantage at the **prover** is ~20–50 × field-op speed (Goldilocks 64-bit mult vs. `secq256r1` 256-bit mult, see `cost_model.md §2.1`), *not* R1CS row reduction.
+>
+> **Revised projection: Goldilocks Poseidon R1CS ≈ 1.0 × `secq256r1` measured, ± 50 % band.** The wider band accounts for (i) different Goldilocks Poseidon variants (Plonky2 t=12, Poseidon2 t=12, neptune), (ii) Circom partial-round optimization differences across fields, (iii) S-box choice (x⁷ vs. x⁵ vs. x¹¹ rugged variants), (iv) byte-packing contributions that are field-independent.
+>
+> | Arity (t) | secq256r1 (measured) | Goldilocks projected (1.0 × ± 50 %) |
+> |---|---|---|
+> | t=3 (Poseidon(2)) | 240 R1CS | 240 ± 120 R1CS |
+> | t=11 (Poseidon(10), F-step) | 968 R1CS | 968 ± 484 R1CS |
+> | t=12 (Poseidon(11), H-step) | 1,102 R1CS | 1,102 ± 551 R1CS |
+>
+> **Implication for §5.2 table.** Goldilocks columns previously read as ~half their `secq256r1` neighbour; under the corrected projection they are **comparable**. Folding wall-clock advantage on Goldilocks comes from **field-op rates** (Goldilocks 20–50 × faster per mult), not constraint reduction. **Week 2 Day 1 must measure actual Goldilocks Poseidon R1CS in Circom** to tighten this band to ±5 %; until then, all wall-clock projections in cost_model §5.2 should be read with this caveat.
 
 ### 5.2 Cost table per decomposition
 
@@ -231,12 +282,25 @@ Tk-mix and Tlen-mix fold into the F-step branch because they share Poseidon(10) 
 
 **Why D2-c gives lower Σ Step·R1CS than monolithic.** The arity-2 chain replaces every `Poseidon(t)` for t > 2 inside reduces with a Merkle tree of `Poseidon(2)` (240 R1CS each, measured by `bench_poseidon_reduce2`). For SlhTk (1 call): the monolithic does Poseidon(10) + reduce-perms ≈ 5,989 R1CS, the chain does 15 × 240 = 3,600 R1CS — 40 % cheaper at the constraint-count level. Summed over all primitives: 4,273 × 240 = 1.03 M R1CS vs. 3.96 M monolithic = **74 % step-work reduction**. The improvement is real but it is **step work**, not prover wall-clock; the dominant prover-side win comes from the Goldilocks field-op speedup in cost_model §5.
 
-**Fold overhead (per scheme).** Day 3 must add scheme-specific fold-overhead numbers from the LatticeFold / Neo / SuperNeo benchmark tables. Approximate placeholders (re-derive on Day 3):
-- LatticeFold: per-fold prover overhead dominated by Ajtai commitment of the new instance + accumulator-norm refresh. Order of ~10⁴–10⁵ Goldilocks-equivalent multiplications per fold.
-- Neo (small-field Ajtai, pay-per-bit): per-fold overhead lower, ~10³–10⁴ mults.
-- SuperNeo: removes Neo's SIMD restriction; per-fold cost similar to Neo.
+**Fold overhead (per scheme) — updated 2026-05-22 with literature anchors.**
 
-For 4,273 folds at ~10⁴ mults each, fold overhead alone is ~4 × 10⁷ mults — comparable to step-circuit work for D2-c, so accumulator overhead is the binding cost, not step work. **Day 3 must verify this before finalizing.**
+The single most load-bearing input to the cost model is **per-fold recursion-circuit overhead in R1CS constraints**. Cited evidence:
+
+- **Nova baseline ≈ 10,000 R1CS constraints per fold step.** SuperNeo §1.1 D6 (ePrint 2026/242): *"with Nova, folding a proof takes only ≈10,000 R1CS constraints, whereas traditional SNARK recursion takes millions."* Confirmed empirically in `oskarth/nova-bench` ([HackMD](https://hackmd.io/@oskarth/rJHXGY6Mn)): *"For SHA256 the number of constraints isn't big enough (~30k) compared to recursive overhead (~10k) to see huge performance gains. This suggests that we want to use somewhat large circuits for Nova folding."*
+- **Neo / SuperNeo claim "logarithmic recursion overhead"** (SuperNeo §1.1 D6) but report **no absolute number**. The "log N" framing suggests sub-Nova overhead but only Week 2 prototype measurement settles the actual constant.
+- **LatticeFold / LatticeFold+ / Cyclo** report only asymptotic complexity (Lnκ Rq-multiplications). LatticeFold+ §6 explicitly defers concrete implementation. Nethermind reference impl exists for LatticeFold but its benchmarks are not in the paper text.
+
+**Implication for the decomposition recommendation.** Under the Nova-class baseline (10K R1CS per fold), total prover work = step_R1CS × fold_count + 10K × fold_count:
+
+| Decomposition | Step R1CS | Folds | Step work | Fold overhead | Total | Ratio vs D2-c |
+|---|---|---|---|---|---|---|
+| D2-c | 240 | 4,273 | 1.03 M | **42.7 M** | **43.7 M** | 1.0 × |
+| D3 | ≈ 5,000 avg | 669 | 3.3 M | 6.7 M | 10.0 M | 0.23 × |
+| D4 | 573,000 | 9 | 5.2 M | 0.09 M | **5.2 M** | 0.12 × |
+
+**D4 wins by 8.4 × over D2-c under the Nova-class overhead assumption**, D3 wins by 4.3 ×. D2-c only beats D4 if per-fold overhead is **< 1.1 K R1CS** — a 9 × improvement on the Nova baseline that has not been empirically demonstrated for any published lattice folding scheme.
+
+**Week 2 Day 1 must measure the actual per-fold overhead for the chosen scheme before locking the decomposition.** Until that measurement, D4 is the **conservative recommendation**; D2-c is *only* the right choice if the scheme delivers sub-1 K R1CS recursion overhead. **The original Week 1 Day 5 recommendation (D2-c primary) was correct on step-shape uniformity but did not account for fold-overhead dominance; this is corrected in §8.**
 
 ---
 
@@ -323,16 +387,33 @@ ADRS construction inside each branch is per-step overhead (~50–200 R1CS based 
 
 **Recommendation.** (c) for flat IVC primary (D2-c) — fold scheme's per-step overhead is amortized over many tiny steps, and the uniformity simplifies the scheme integration. (b) for multi-fold primary (D5) — Neo/SuperNeo handle heterogeneous branches natively, no padding tax.
 
-### 7.2 Goldilocks Poseidon re-instantiation
+### 7.2 Field choice — Goldilocks vs. Mersenne-61 vs. Mersenne-31 vs. cyclotomic Rq
 
-Current circuit uses **circomlib BN254 Poseidon constants** mod `p_secq256r1` (`CLAUDE.md:123-125`, `README.md:11,132-134`). For Neo / SuperNeo / Cyclo, which target small fields (Goldilocks-family), Poseidon must be re-instantiated under a Goldilocks-safe variant:
+Current circuit uses **circomlib BN254 Poseidon constants** mod `p_secq256r1` (`CLAUDE.md:123-125`, `README.md:11,132-134`). The right field for Week 2 depends on which folding scheme is chosen. **Important taxonomy** (a common confusion this doc earlier conflated):
 
-- **Constants:** Plonky2 / Poseidon2 / Tip5 publish ready-to-use round constants and MDS matrices for Goldilocks at common widths.
-- **Implementation cost:** ~1–2 engineer-days to replace `circuits/poseidon/poseidon_wrap.circom` and re-generate all measurements.
-- **Security:** Goldilocks Poseidon variants have published security analyses (see Poseidon2 paper). External review still recommended before any deploy.
-- **R1CS impact:** Goldilocks Poseidon has 0.4–0.6× the round count of circomlib BN254 Poseidon ⇒ projected R1CS per perm shrinks by the same factor (Section 5.1 methodology).
+| Field | Bit-width | Used by | Lattice-fold compatible? |
+|---|---|---|---|
+| **Goldilocks** (p = 2⁶⁴ − 2³² + 1) | 64 | Plonky2, Neo (with caveats) | **Neo / SuperNeo only.** LatticeFold / LatticeFold+ **cannot use Goldilocks** — their q must satisfy q ≡ 1 + 2t (mod 4t) for some t, which Goldilocks does not. |
+| **Mersenne-61** (p = 2⁶¹ − 1) | 61 | **Neo's "almost-Goldilocks"** (per Neo §6.1) | Yes — Neo paper directly. |
+| **Mersenne-31** (p = 2³¹ − 1), **BabyBear / KoalaBear** | 31 | Plonky3, leanSig, leanMultisig (Ethereum PQ aggregation **STARK** direction) | **No.** These are STARK-friendly small fields, *not* lattice-friendly. leanSig uses them with **Plonky3 monolithic SNARK**, not folding. |
+| **Cyclotomic Rq** (Z[X]/(X^d+1), d = 64, q ≈ 2³⁰) | (ring) | LatticeFold / LatticeFold+ / Cyclo | Yes — native ring. |
 
-**Action item.** If Day 3 cost model is sensitive to the Goldilocks ±25% band, allocate Week 1 Day 4 to a quick Goldilocks Poseidon prototype to tighten the constant to ±5 %.
+**Implication.** The earlier framing in this doc ("31-bit Mersenne is the lattice direction Ethereum is converging on") **conflated two different research directions**:
+
+- **Lattice folding path:** Neo / SuperNeo → **Mersenne-61 or Goldilocks**. LatticeFold / LatticeFold+ / Cyclo → **cyclotomic Rq**.
+- **STARK path** (Ethereum PQ direction per leanSig): Mersenne-31 + Plonky3 + monolithic SNARK or zkVM. **Not folding.**
+
+**Recommendation per scheme:**
+
+| Folding scheme | Native field | Poseidon target | Cost vs. our current `secq256r1` Poseidon |
+|---|---|---|---|
+| **Neo / SuperNeo** | Mersenne-61 or Goldilocks | Plonky2 Poseidon (Goldilocks) or Poseidon2 (M61) | ~1.0 × R1CS rows (per §5.1 corrected projection); prover wall-clock 20–50 × faster due to small-field ops |
+| **LatticeFold+ / Cyclo** | Cyclotomic Rq | Poseidon must operate over Rq native — different Poseidon family (no off-the-shelf Plonky2 / Poseidon2 fit) | Custom instantiation needed; cost unknown |
+
+- **Week 2 Day 1 sign-off must lock the (scheme, field, Poseidon variant) tuple.** The default conservative choice for Neo path: Plonky2 Goldilocks Poseidon (t=12, x⁷). For LatticeFold+ path: defer to LatticeFold reference impl's chosen instantiation.
+- **Security:** Plonky2 Goldilocks Poseidon and Poseidon2 (M61) both have published analyses; external cryptographer review recommended before any production deploy regardless.
+
+**The "Mersenne-31 as alternative to Goldilocks" wording in this doc's earlier revision was incorrect.** Mersenne-31 is a STARK-direction choice, not a lattice-fold-direction choice; it does not slot into Neo/SuperNeo or LatticeFold-family. Corrected here for clarity.
 
 ### 7.3 Final SNARK choice
 
@@ -354,14 +435,18 @@ SLH-DSA-128f has ~3× more F invocations (11,583 vs. 3,689) but may benefit *mor
 
 ### 8.1 Primary decompositions to model
 
-**Flat-IVC primary: D2-c** (per-primitive with arity-2 reduce chain).
-- Step circuit: uniform arity-2 `Poseidon(2)` + state update.
-- Step R1CS: **240 measured** (`bench_poseidon_reduce2`, `secq256r1`, --O2) / **≈ 120 projected ±25 %** (Goldilocks).
-- Fold count: 4,273.
-- State width: ~16 FE.
-- Total step work: **1,025,520 R1CS** (`secq256r1`) ≈ **0.51 M** (Goldilocks).
-- **Reduction vs. monolithic 3.99 M: 74 % step-work reduction.** Prover wall-clock reduction is larger because Goldilocks field ops are 20–50× faster than `secq256r1` (see cost_model §5).
-- **Reason chosen:** smallest uniform step (exercises folding-scheme amortization maximally); uniform shape simplifies scheme integration (no heterogeneous-branch CCS); largest gap to monolithic baseline.
+**Flat-IVC primary — D4 (per-XMSS-layer)** under the conservative per-fold-overhead assumption (≈ 10 K R1CS, Nova-class baseline per SuperNeo §1.1 D6).
+- Step circuit: one full XMSS subtree verification (35 WOTS chains + 1 T_len compress + 9 Merkle hashes) per fold step.
+- Step R1CS: ≈ 573,000 measured (component sum from `results/results_summary.md`) / ≈ 286,500 projected ±25 % (Goldilocks).
+- Fold count: **9** (1 H_msg + 1 FORS + 7 HT layers).
+- State width: ~16 FE (xmss_root + tree_idx + leaf_idx).
+- **Total prover work (step + fold overhead) ≈ 5.2 M R1CS** (`secq256r1`) under Nova-class 10 K-R1CS fold overhead — **8.4 × lower than D2-c under the same assumption**.
+- **Reason chosen:** total prover work dominates wall-clock when fold overhead is non-trivial; D4's tiny fold count (9) makes fold overhead vanish; conservative against any folding scheme with non-zero recursion-circuit cost.
+
+**Flat-IVC aggressive alternative — D2-c (per-primitive arity-2 chain).**
+- Step circuit: uniform `Poseidon(2)` = 240 R1CS measured, fold count 4,273.
+- **Only competitive if** per-fold overhead is **< 1.1 K R1CS** — a 9 × improvement on the published Nova baseline. Neo/SuperNeo claim "logarithmic recursion overhead" but report no absolute number; until Week 2 Day 1 measures the actual constant, D2-c is **not** the lead recommendation despite its cleaner CCS shape.
+- **Reason it's still in the running:** if the chosen scheme delivers sub-1 K R1CS recursion, D2-c's uniform shape and 4,273-step parallelism amortization potentially wins again.
 
 **Multi-fold primary: D5+D6+D7** (per-primitive heterogeneous leaves, per-tree/per-WOTS-pk mid, single top).
 - Step circuits: 5 leaf branches (155–660 R1CS each, depending on arity) + 2 mid branches (≈2–4 K R1CS) + 1 top step (≈3 K R1CS).

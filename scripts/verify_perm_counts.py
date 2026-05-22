@@ -65,16 +65,20 @@ class Check:
     tolerance_pct: float
     units: str = ""
 
+    def __post_init__(self) -> None:
+        # `expected==0` would let a corrupt bench (0 R1CS) silently pass the
+        # tolerance check. Disallow it — callers should never construct such
+        # a Check, and the defensive guard surfaces bench-corruption fast.
+        if self.expected == 0:
+            raise ValueError(f"Check {self.name!r}: expected=0 is forbidden (would mask bench corruption)")
+
     @property
     def passed(self) -> bool:
-        # When expected==0, tolerance_pct is treated as an absolute threshold.
-        if self.expected == 0:
-            return abs(self.actual) <= self.tolerance_pct
         return abs(self.actual - self.expected) / abs(self.expected) * 100 <= self.tolerance_pct
 
     def report(self) -> str:
         delta = self.actual - self.expected
-        delta_pct = (delta / self.expected * 100) if self.expected else 0.0
+        delta_pct = delta / self.expected * 100
         status = "PASS" if self.passed else "FAIL"
         return (
             f"  [{status}] {self.name}: expected={self.expected:,.0f}{self.units}, "
@@ -158,6 +162,40 @@ def main() -> int:
     if not chk.passed:
         failures += 1
 
+    # --- Check 3.5: reduce-arity is consistent with measured compress primitive ---
+    # Catches the SW-review F1 hazard: if hashes.circom changes a compress primitive's
+    # PoseidonReduce arity (e.g. SlhTlen swaps `PoseidonReduce(35)` for `(7)`), the
+    # measured `bench_poseidon_Tlen` shifts by Δ × 240 R1CS, but `bench_poseidon_reduce_35`
+    # stays at 9,108. The "mix" residual (= compress total - reduce total) then drifts
+    # out of band, firing this check loudly.
+    print("\n[3.5] Compress-primitive ≈ PoseidonReduce(arity) + measured mix residual")
+    REDUCE_ARITY = {"Tk": params["SLH_K"], "Tlen": params["SLH_LEN"], "HMsg": 64}
+    # Baseline mix residuals (= bench_poseidon_X - bench_poseidon_reduce_{arity_X}),
+    # captured from a known-good run on circom 2.2.3 --O2 secq256r1. Mix residual
+    # = Poseidon(t_mix) cost + byte-packing + ADRS-fold; stable for a given hashes.circom
+    # shape. If hashes.circom changes structurally, these need updating in lockstep
+    # with the design doc (and this check makes the doc-vs-code mismatch loud).
+    MIX_RESIDUAL = {"Tk": 2_632, "Tlen": 5_320, "HMsg": 9_724}
+    TOL_XCHECK_PCT = 2.0
+    for prim, arity in REDUCE_ARITY.items():
+        primitive_r1cs = bench.get(f"bench_poseidon_{prim}")
+        reduce_r1cs = bench.get(f"bench_poseidon_reduce_{arity}")
+        if primitive_r1cs is None or reduce_r1cs is None:
+            print(f"  [FAIL] bench_poseidon_{prim} or bench_poseidon_reduce_{arity} missing")
+            failures += 1
+            continue
+        observed_mix = primitive_r1cs - reduce_r1cs
+        chk = Check(
+            name=f"bench_poseidon_{prim} − PoseidonReduce({arity}) ≈ mix residual",
+            expected=MIX_RESIDUAL[prim],
+            actual=observed_mix,
+            tolerance_pct=TOL_XCHECK_PCT,
+            units=" R1CS",
+        )
+        print(chk.report())
+        if not chk.passed:
+            failures += 1
+
     # --- Check 4: Σ(per-prim R1CS × call count) vs measured main_poseidon ---
     print("\n[4] Per-primitive R1CS × call counts vs measured main_poseidon")
     measured_per_prim = {p: bench.get(f"bench_poseidon_{p}") for p in calls}
@@ -183,30 +221,34 @@ def main() -> int:
         if not chk.passed:
             failures += 1
 
-    # --- Check 5: D2-c flat-IVC step cost (canonical for Week 2) ---
-    print("\n[5] D2-c flat-IVC step cost (canonical for scheme_selection.md)")
+    # --- Check 5: design-doc canonical numbers vs measured ---
+    # NOTE on what this checks: the `claimed` values below are hand-maintained
+    # in this script to mirror specific load-bearing numbers in the design doc.
+    # When the doc text is updated, update these literals too. The check fires
+    # if a future code change (e.g. circom version bump, --O2 → --O1) shifts
+    # the measured value away from what the doc says. It does NOT parse the
+    # doc text — keeping doc and verifier in sync is the maintainer's job.
+    print("\n[5] Design-doc canonical numbers — drift detector vs measured")
     if p2_r1cs is None or main_r1cs is None:
-        print("  [SKIP] missing Poseidon(2) or main_poseidon measurement")
+        print("  [FAIL] missing Poseidon(2) or main_poseidon measurement — Check 5 unverifiable")
+        failures += 1
     else:
         d2c_total = p2_r1cs * grand_total_perms
         reduction_pct = (1 - d2c_total / main_r1cs) * 100
-        print(f"  D2-c step circuit: 1× Poseidon(2) = {p2_r1cs} R1CS")
-        print(f"  D2-c fold count: {grand_total_perms}")
-        print(f"  D2-c total step work: {d2c_total:,} R1CS")
-        print(f"  Reduction vs monolithic {main_r1cs:,}: {reduction_pct:.1f}%")
-        # Design-doc canonical numbers — must match the values cited in the
-        # doc itself. Update both this dict and the doc together. The drift
-        # check makes the verifier a one-way ratchet against silent rot.
+        print(f"  Measured: Poseidon(2) = {p2_r1cs} R1CS; D2-c fold count = {grand_total_perms};"
+              f" D2-c total = {d2c_total:,} R1CS; reduction vs monolithic = {reduction_pct:.1f}%")
+        # `claimed` mirrors specific numbers in step_function_slh_dsa_128s.md §1, §2.1, §5.2, §8.
+        # If the doc updates these (or if circom output shifts), this check fires.
         doc_canonical = {
-            "step R1CS": (240, p2_r1cs),
-            "total D2-c R1CS": (1_025_520, d2c_total),
-            "reduction vs monolithic (%)": (74.3, reduction_pct),
+            "Poseidon(2) R1CS (§2.1 table, §8 D2-c row)": (240, p2_r1cs),
+            "D2-c total step work R1CS (§8 Conservative alternative)": (1_025_520, d2c_total),
+            "Reduction vs monolithic % (§5 Why D2-c gives lower)": (74.3, reduction_pct),
         }
         for label, (claimed, measured) in doc_canonical.items():
-            drift = (measured - claimed) / claimed * 100 if claimed else 0
+            drift = (measured - claimed) / claimed * 100
             tag = "OK" if abs(drift) < TOL_DOC_DRIFT else "STALE"
             print(
-                f"  [{tag}] doc claim {label} = {claimed:,} vs measured {measured:,.1f} "
+                f"  [{tag}] doc canonical {label}: doc={claimed:,}, measured={measured:,.1f} "
                 f"({drift:+.2f}%)"
             )
             if tag == "STALE":

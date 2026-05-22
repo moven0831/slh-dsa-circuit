@@ -54,20 +54,37 @@ def read_params() -> dict[str, int]:
     }
 
 
-def read_bench_constraints() -> dict[str, int]:
+def read_bench_constraints(min_constraints: int = 50) -> dict[str, int]:
     """Parse `raw_bench.txt` → {circuit: nConstraints} for OK rows only.
 
     Exits with a clear error if the bench file is missing — callers run
     after `yarn bench`, so an empty file means the user forgot that step.
+
+    Filters out suspicious rows: any `nConstraints` below `min_constraints`
+    is rejected with a loud warning (these usually indicate a compile that
+    silently produced a stub circuit or an `info` output parse failure).
+    Default floor is 50 — even the smallest sane primitive in this repo
+    (`bench_adrs_sanity` = 198) is well above that.
     """
     if not RAW_BENCH.exists():
         sys.stderr.write(f"ERROR: {RAW_BENCH} missing — run `yarn bench` first.\n")
         sys.exit(1)
     out: dict[str, int] = {}
+    suspicious: list[tuple[str, int]] = []
     for line in RAW_BENCH.read_text().splitlines():
         d = parse_line(line)
-        if d and d["status"] == "OK" and "nConstraints" in d:
-            out[d["circuit"]] = int(d["nConstraints"])
+        if not (d and d["status"] == "OK" and "nConstraints" in d):
+            continue
+        n = int(d["nConstraints"])
+        if n < min_constraints:
+            suspicious.append((d["circuit"], n))
+            continue
+        out[d["circuit"]] = n
+    if suspicious:
+        sys.stderr.write(
+            f"WARNING: dropping {len(suspicious)} bench row(s) with nConstraints < {min_constraints} "
+            f"(likely corrupt): {suspicious}\n"
+        )
     return out
 
 
