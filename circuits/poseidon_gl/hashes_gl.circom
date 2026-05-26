@@ -33,8 +33,8 @@ include "poseidon_gl_wrap.circom";
 
 // SlhF — F primitive, arity-12 (fits in one PoseidonGlPermute):
 //   tag(1) + seed(2) + ADRS(7) + M(2) = 12 FEs.
-// R1CS: ~472 (permutation) + ~128 (PackBytes16To2Fe pk_seed) + ~128 (PackBytes16To2Fe m)
-//     + ~128 (UnpackFe2To16Bytes out) = ~856 baseline.
+// Measured R1CS: 852 (see research/folding/poseidon_gl_audit.md).
+// Breakdown: 472 (perm) + ~120 per pack + ~120 unpack = ~832, with --O2 sharing.
 template SlhF() {
     signal input pk_seed[16];
     signal input layer;
@@ -76,8 +76,8 @@ template SlhF() {
 // SlhH — H primitive, arity-14 (needs the 2-perm Sponge14):
 //   tag(1) + seed(2) + ADRS(7) + M1(2) + M2(2) = 14 FEs.
 // Plonky2 sponge convention (rate=8, capacity=4): 2 permutations.
-// R1CS: ~944 (sponge) + ~128 (pk_seed pack) + 2 × ~128 (M1, M2 packs)
-//     + ~128 (out unpack) = ~1,456 baseline.
+// Measured R1CS: 1,436 (see audit doc). Breakdown: 2 × 472 (sponge) + 3 × ~120 (packs)
+//   + ~120 unpack = ~1,424; matches measured within --O2 sharing tolerance.
 // The input m[32] is M1 || M2 (16 bytes each).
 template SlhH() {
     signal input pk_seed[16];
@@ -123,9 +123,12 @@ template SlhH() {
 }
 
 // SlhTk — T_k primitive, FORS k-tree-roots compression.
+// (Not used by D4 HT-layer fold; implemented for Week-3 FORS re-use.)
 // Binary Merkle-reduce of k=14 leaves (each 16 B = 2 FE) via PoseidonGlReduce(14),
 // then final mix Poseidon over arity-12: tag(1) + seed(2) + ADRS(7) + reduce_out(2) = 12.
-// R1CS: 14 × 472 (reduce) + 472 (mix) + pack/unpack overhead ≈ 7.1K.
+// Measured R1CS: 8,668 (see audit doc). Breakdown: 14 × 440 (reduce-nodes, --O2 prunes
+// zero-padded lanes from PoseidonGl(4) to ~440 vs the bare 472 perm cost)
+// + 14 × ~120 (leaf packs) + 472 (mix) + ~120 (out unpack) = ~8.4K; matches measured.
 //
 // Signal interface matches circuits/poseidon/hashes.circom SlhTk: m[k*16] = m[224].
 template SlhTk() {
@@ -184,8 +187,9 @@ template SlhTk() {
 
 // SlhTlen — T_len primitive, WOTS+ chain-pubkey compression.
 // Same structure as SlhTk but reduces 35 leaves instead of 14.
-// R1CS: 38 × 472 (reduce — same tree shape as PoseidonReduce(35)) + 472 (mix)
-//     + pack/unpack ≈ 18.4K.
+// Measured R1CS: 21,892 (see audit doc). Breakdown: 38 × 440 (reduce-nodes, same tree
+// shape as PoseidonReduce(35): 18+9+5+3+2+1 = 38) + 35 × ~120 (leaf packs) + 472 (mix)
+// + ~120 (out unpack) = ~21.6K; matches measured.
 //
 // Signal interface matches circuits/poseidon/hashes.circom SlhTlen: m[35*16] = m[560].
 template SlhTlen() {

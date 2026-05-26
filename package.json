@@ -16,7 +16,8 @@
     "compile:shake": "circomkit compile main_shake",
     "compile:poseidon": "circomkit compile main_poseidon",
     "compile:all": "yarn compile:sha2 && yarn compile:shake && yarn compile:poseidon",
-    "test:poseidon_gl": "bash scripts/test_poseidon_gl.sh"
+    "test:poseidon_gl": "bash scripts/test_poseidon_gl.sh",
+    "test:slh_gl": "bash scripts/check_slh_gl_consistency.sh"
   },
   "dependencies": {
     "circomkit": "^0.3.4",

@@ -117,10 +117,13 @@ template PoseidonGlSponge14() {
 // over (left_lo, left_hi, right_lo, right_hi) → 2-FE output.
 //
 // For N=14: ceil(14/2) + ceil(7/2) + ceil(4/2) + ceil(2/2) = 7 + 4 + 2 + 1 = 14 nodes
-// (the same tree shape as PoseidonReduce over secq256r1). With PoseidonGl(4) ≈ 472
-// R1CS per node, total ≈ 14 × 472 = 6,608 R1CS — vs the secq256r1 baseline of
-// 14 × 240 = 3,360 R1CS (≈ 2× bloat per node, expected from the corrected
-// cost_model.md §5.1 projection for the t=12 Goldilocks permutation).
+// (the same tree shape as PoseidonReduce over secq256r1).
+//
+// Measured per-node cost: 440 R1CS (--O2 prunes zero-padded lanes 4..11 from
+// PoseidonGl(4), shaving 32 mults vs the bare 472-R1CS permutation). For N=14
+// reduce-only: 14 × 440 = 6,160 R1CS. Vs the secq256r1 baseline of 14 × 240 =
+// 3,360 R1CS, this is a 1.83× bloat per node — expected from the t=12 Goldilocks
+// permutation vs t=3 secq256r1 Poseidon(2). See research/folding/poseidon_gl_audit.md.
 //
 // Pads with zero leaves when N is odd (same convention as PoseidonReduce).
 template PoseidonGlReduce(N) {
