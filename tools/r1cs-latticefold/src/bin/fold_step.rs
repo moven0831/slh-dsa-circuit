@@ -147,11 +147,16 @@ fn main() -> Result<()> {
     };
     println!("  CCCS (commitment + x_ccs) built in {:?}", t.elapsed());
 
-    // Initial accumulator: linearize cm_i against a random witness (this is what
-    // e2e.rs does to set up the LCCCS accumulator from a fresh CCCS).
+    // Initial accumulator: linearize cm_i against ITS OWN witness.
+    // (Day-4 review caught this: upstream e2e.rs uses a random rand_w_ccs because
+    // its `cm_i` was already committed with `wit`, and the linearization just
+    // produces an LCCCS *structure* using cm_i.cm + wit_acc's MLE evaluations.
+    // But that pattern produces inconsistent LCCCS in our setup — acc.cm attests
+    // to `wit` while acc.u encodes wit_acc's evaluations, breaking the verifier's
+    // recomputation. Fix: use the real witness as wit_acc so acc.cm and acc.u
+    // both correspond to the same w_ccs.)
     let t = Instant::now();
-    let rand_w_ccs: Vec<RqNTT> = (0..w_ccs.len()).map(|i| RqNTT::from(i as u64)).collect();
-    let wit_acc = Witness::from_w_ccs::<GoldilocksDP>(rand_w_ccs);
+    let wit_acc = Witness::from_w_ccs::<GoldilocksDP>(w_ccs.clone());
     let mut setup_transcript = PoseidonTranscript::<RqNTT, CS>::default();
     let (acc, _) = LFLinearizationProver::<_, T>::prove(&cm_i, &wit_acc, &mut setup_transcript, &ccs)
         .context("LFLinearizationProver::prove (setup)")?;

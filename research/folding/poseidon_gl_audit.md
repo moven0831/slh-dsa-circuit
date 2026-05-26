@@ -100,7 +100,62 @@ Per-stage wall-clock on M3 / release build:
 - ✓ Peak RSS comfortably under 1 GB (M3/24GB had no memory pressure; process didn't trigger Activity Monitor's "memory pressure" indicator)
 - ⊘ Per-fold recursion overhead — not yet measured; requires the full `NIFSProver::prove` invocation (Day-4 Phase B).
 
-The relation-check timing implies the full prover (which performs accumulator update + linearization + folding) should land in the 5–30 s range for a single HT-layer fold step, with 7 sequential fold steps amortizable over the Week-2 ≤2s-per-step target.
+The relation-check timing implies the full prover (which performs accumulator update + linearization + folding) should land in the 5–30 s range for a single HT-layer fold step. **HOWEVER**, Phase B (§6b) shows this projection is contingent on resolving a verify-side blocker not visible at the relation-check level. Read §6b before quoting Phase A timings as a fold throughput claim.
+
+## 6b. Day-4 Phase-B — Full NIFSProver::prove + NIFSVerifier::verify
+
+Result: **prove SUCCEEDS, verify FAILS** on the 440-constraint smoke circuit.
+
+Reproducer:
+
+```
+$ cargo run --release --bin fold_step \
+    --manifest-path tools/r1cs-latticefold/Cargo.toml \
+    -- --r1cs build/poseidon_gl_bench/bench_poseidon_gl_reduce2/bench_poseidon_gl_reduce2.r1cs \
+       --wtns build/poseidon_gl_bench/bench_poseidon_gl_reduce2/all_zeros.wtns
+```
+
+Per-stage prove timings (on bench_poseidon_gl_reduce2):
+
+| Stage | Wall-clock |
+|---|---:|
+| Parse + lift (Phase-A pipeline) | 11 ms |
+| `CCS::from_r1cs_padded` | 100 µs (pad 440 → 4096 rows) |
+| Pre-flight `ccs.check_relation` | 4 ms |
+| AjtaiCommitmentScheme + `Witness::from_w_ccs` (L=5 gadget decomp) | 2 ms |
+| `wit.commit::<DP>(&scheme)` (Ajtai commit) | 2 ms |
+| `LFLinearizationProver::prove` (initial accumulator) | 20 ms |
+| `NIFSProver::prove` (the fold step) | **254 ms** |
+| Proof size (compressed + uncompressed) | 133 KB / 133 KB |
+
+`NIFSVerifier::verify` returns `Err(LinearizationFailed(SumCheckFailed(InvalidProof("incorrect sumcheck sum"))))`. The "Expected" side of the diagnostic has concrete ring-element values; the "Received" side prints as truncated `CubicExtField(,,)` (a Display-formatting quirk on partial CRT elements, not an actual zero).
+
+### Root-cause investigation (rejected hypotheses)
+
+1. **"degree-2 vs degree-3 CCS"** — REJECTED. LatticeFold's unit tests use `from_r1cs_padded` (producing d=2, q=2, S=[[0,1],[2]]) and pass. The linearization prover reads `ccs.d + 1` dynamically (`linearization.rs:199-200`) and iterates `ccs.S[i]` generically (`utils.rs:91-106`) — degree is not the issue.
+2. **"mismatched wit_acc in setup linearization"** — TESTED + REJECTED. Replacing the random rand_w_ccs with the real w_ccs as setup-witness produced the same error pattern (only the expected sum value changed). See fold_step.rs git diff between the two attempts.
+
+### Working hypothesis
+
+**Gadget-decomposition norm mismatch.** `Witness::from_w_ccs` calls `gadget_decompose(B=2^15, L=5)` on the coefficient form of the witness ring elements. Our Circom witness contains full-range Goldilocks coefficients (up to ~2^64). `B^L = 2^75 > 2^64` so the decomposition is well-defined coefficient-wise, but the resulting MLE evaluations in the linearization sumcheck diverge between the prover (computing on the decomposed `f_coeff`) and the verifier (reconstructing from the committed `cm`). This may be the gap between:
+- LatticeFold's security argument (assumes small-norm witness)
+- Our Circom witness (full-range Goldilocks, no a priori norm bound)
+
+Settling this requires reading `LFLinearizationProver::prove` (`crates/latticefold/src/nifs/linearization.rs`) and the verifier's sumcheck reconstruction to identify exactly which MLE evaluation differs. **Estimated Week-3 effort: ~1 engineer-day of source archaeology + a small targeted test.**
+
+### Resolution paths (Week-3+)
+
+1. **Diagnose the witness-encoding mismatch.** Single-file investigation; outcome may be a one-line fix (different DecompositionParams) or a larger pre-decomposition step on our witness.
+2. **Use LatticeFold+** (NethermindEth/latticefold WIP). Different witness model may sidestep the issue natively; status of LatticeFold+ verified is `examples + parameter tuning TODO` per upstream README.
+3. **Pivot to Nightstream / Neo** (Day-5 measurement-spike target). Different folding scheme; natively folds the same CCS shape we already produce; trade-off is no scaling demonstration yet at our 486K-constraint size.
+
+### What Phase B is NOT
+
+- Phase B is not a refutation of Phase A. The 5-second `check_relation` on 486K constraints stands as a valid lower-bound for any prover that goes through CCS — the relation check is a subroutine of NIFS.
+- Phase B is not a refutation of the Goldilocks Poseidon port. The Day-1 reference vectors + Day-2 bloat factor still hold.
+- Phase B is not the "fold-overhead per step" measurement. The 254 ms NIFSProver::prove is the prover-side cost, but without a verifying proof we can't yet claim this is the cost of a verified fold step.
+
+The Day-4 deliverable is: **prove pipeline end-to-end validated** (no panics, no OOMs, clean prove side), **verify failure captured as a concrete reproducible blocker for Week-3**. This is decision-grade information for the Week-2 recommendation memo (Day 5).
 
 ## 7. Files
 
