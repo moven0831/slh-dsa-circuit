@@ -1,8 +1,8 @@
 [toolchain]
 # LatticeFold's upstream pins nightly-2025-03-06 (rustc 1.87) but its transitive
-# dep serde_with 3.20.0 requires rustc 1.88+. We use a later nightly that's MSRV-compatible.
-# Confirmed building cleanly on rustc 1.97.0-nightly (ca9a134e0 2026-04-26).
-# If pinning is needed for reproducibility, set this back to "nightly-2025-10-XX"
-# or whichever nightly satisfies MSRV 1.88 at build time.
-channel = "nightly"
+# dep serde_with 3.20.0 requires rustc 1.88+. Pinned to a known-good dated
+# nightly that satisfies MSRV 1.88 to keep builds reproducible — confirmed
+# building cleanly + smoke + smoke_neg PASS on Day-3 (commit 51cb6ec).
+# To bump: rustup toolchain install nightly-YYYY-MM-DD, then update this date.
+channel = "nightly-2026-04-26"
 components = ["rustfmt", "clippy"]
