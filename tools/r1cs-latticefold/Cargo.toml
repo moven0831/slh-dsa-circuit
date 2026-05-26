@@ -22,6 +22,10 @@ path = "src/bin/parse_only.rs"
 name = "smoke_neg"
 path = "src/bin/smoke_neg.rs"
 
+[[bin]]
+name = "fold_step"
+path = "src/bin/fold_step.rs"
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
@@ -41,6 +45,9 @@ cyclotomic-rings   = { git = "https://github.com/NethermindEth/latticefold", rev
 stark-rings        = { git = "https://github.com/NethermindEth/stark-rings.git", branch = "main", default-features = false }
 stark-rings-linalg = { git = "https://github.com/NethermindEth/stark-rings.git", branch = "main", default-features = false }
 num-traits         = "0.2"
+# Arkworks — used by the fold_step binary for proof serialization + test_rng.
+ark-serialize      = "0.4"
+ark-std            = "0.4"
 
 [profile.release]
 debug = true   # keep symbols for flamegraph + ergonomic stack traces under research workloads

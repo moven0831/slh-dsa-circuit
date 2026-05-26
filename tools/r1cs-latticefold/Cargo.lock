@@ -663,6 +663,8 @@ name = "r1cs-latticefold"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark-serialize",
+ "ark-std",
  "clap",
  "cyclotomic-rings",
  "env_logger",
