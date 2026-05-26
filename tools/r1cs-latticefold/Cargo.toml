@@ -1,0 +1,41 @@
+[package]
+name = "r1cs-latticefold"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Circom .r1cs + .wtns parser + LatticeFold CCS importer for the SLH-DSA Week 2 prototype."
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "r1cs_latticefold"
+path = "src/lib.rs"
+
+[[bin]]
+name = "smoke"
+path = "src/bin/smoke.rs"
+
+[[bin]]
+name = "parse_only"
+path = "src/bin/parse_only.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+log = "0.4"
+env_logger = "0.10"
+
+# LatticeFold + cyclotomic-rings + stark-rings.
+# Pinned per research/folding/week2_prereqs.md §1.
+# LatticeFold pin per research/folding/week2_prereqs.md §1.
+latticefold        = { git = "https://github.com/NethermindEth/latticefold", rev = "15cc045c18ea92a50c23528d1e7b62dd392b8c42" }
+cyclotomic-rings   = { git = "https://github.com/NethermindEth/latticefold", rev = "15cc045c18ea92a50c23528d1e7b62dd392b8c42" }
+# stark-rings* MUST match LatticeFold's workspace spec exactly (branch = main) so Cargo
+# deduplicates the dep graph — using a different rev/branch spec produces "diamond
+# dependency" mismatched-types errors even when the SHA is the same. The actual SHA is
+# pinned by Cargo.lock once we commit it.
+stark-rings        = { git = "https://github.com/NethermindEth/stark-rings.git", branch = "main", default-features = false }
+stark-rings-linalg = { git = "https://github.com/NethermindEth/stark-rings.git", branch = "main", default-features = false }
+num-traits         = "0.2"
+
+[profile.release]
+debug = true   # keep symbols for flamegraph + ergonomic stack traces under research workloads
