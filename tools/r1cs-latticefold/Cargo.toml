@@ -18,6 +18,10 @@ path = "src/bin/smoke.rs"
 name = "parse_only"
 path = "src/bin/parse_only.rs"
 
+[[bin]]
+name = "smoke_neg"
+path = "src/bin/smoke_neg.rs"
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
@@ -31,8 +35,9 @@ latticefold        = { git = "https://github.com/NethermindEth/latticefold", rev
 cyclotomic-rings   = { git = "https://github.com/NethermindEth/latticefold", rev = "15cc045c18ea92a50c23528d1e7b62dd392b8c42" }
 # stark-rings* MUST match LatticeFold's workspace spec exactly (branch = main) so Cargo
 # deduplicates the dep graph — using a different rev/branch spec produces "diamond
-# dependency" mismatched-types errors even when the SHA is the same. The actual SHA is
-# pinned by Cargo.lock once we commit it.
+# dependency" mismatched-types errors even when the SHA is the same. Effective SHA is
+# pinned by Cargo.lock (a907aab3... at the time of writing — see week2_prereqs.md §1).
+# To bump: `cargo update -p stark-rings -p stark-rings-linalg`, then re-run smoke.
 stark-rings        = { git = "https://github.com/NethermindEth/stark-rings.git", branch = "main", default-features = false }
 stark-rings-linalg = { git = "https://github.com/NethermindEth/stark-rings.git", branch = "main", default-features = false }
 num-traits         = "0.2"

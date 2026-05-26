@@ -12,6 +12,25 @@
 //!   `latticefold::arith::R1CS<GoldilocksRingNTT>` — each scalar lifted to a
 //!   degree-0 cyclotomic ring element via `GoldilocksRingNTT::from(u64)`.
 //! - [`circom_witness_to_latticefold`]: same lift for the witness vector.
+//! - [`load_circom_for_latticefold`]: convenience — parse + lift + cross-validate
+//!   wire counts in one call. Use this for Day-4+ pipelines; the lower-level
+//!   functions stay public for ad-hoc inspection.
+//!
+//! # Convention for the public-input length `l`
+//! LatticeFold's z-vector layout (per `crates/latticefold/examples/e2e.rs`) is
+//! `z = [1] ++ x_ccs ++ w_ccs` — the constant-1 wire at position 0, then `l`
+//! public-input field elements, then the private witness. Circom emits its
+//! witness in exactly the same shape (`z[0] = 1`, `z[1..=n_pub_out]` = public
+//! outputs, `z[n_pub_out+1..=n_pub_out+n_pub_in]` = public inputs, then private
+//! signals), and the R1CS matrix columns index `z` directly. So:
+//!
+//!   - `l = n_pub_in + n_pub_out` (does NOT include the constant)
+//!   - LatticeFold internally subtracts 1 for the constant in `(n - l - 1)`
+//!     witness-length computations (verified in `arith.rs` `from_r1cs_padded`
+//!     and `nifs.rs` consumers).
+//!
+//! No reordering of z is needed — Circom's layout already matches LatticeFold's
+//! convention exactly.
 
 #![deny(unsafe_code)]
 #![warn(rust_2018_idioms)]
@@ -288,13 +307,15 @@ pub fn parse_circom_wtns(path: &Path) -> Result<CircomWitness> {
 
 fn read_u32_le(f: &mut File) -> Result<u32> {
     let mut buf = [0u8; 4];
-    f.read_exact(&mut buf)?;
+    f.read_exact(&mut buf)
+        .context("reading u32 LE (truncated R1CS or wtns file?)")?;
     Ok(u32::from_le_bytes(buf))
 }
 
 fn read_u64_le(f: &mut File) -> Result<u64> {
     let mut buf = [0u8; 8];
-    f.read_exact(&mut buf)?;
+    f.read_exact(&mut buf)
+        .context("reading u64 LE (truncated R1CS or wtns file?)")?;
     Ok(u64::from_le_bytes(buf))
 }
 
@@ -369,7 +390,8 @@ pub fn circom_r1cs_to_latticefold(circom: &CircomR1cs) -> Result<R1CS<Goldilocks
 
 /// Convert a parsed Circom witness vector (Goldilocks) into the LatticeFold
 /// `z`-vector form: `Vec<GoldilocksRingNTT>`. Order is unchanged — wire i in
-/// Circom maps to z[i].
+/// Circom maps to z[i]. See the module-level convention note on `l` for why
+/// no reordering is needed: Circom's z layout already matches LatticeFold's.
 pub fn circom_witness_to_latticefold(wtns: &CircomWitness) -> Result<Vec<GoldilocksRingNTT>> {
     if wtns.field_size_bytes != 8 {
         bail!(
@@ -382,4 +404,64 @@ pub fn circom_witness_to_latticefold(wtns: &CircomWitness) -> Result<Vec<Goldilo
         out.push(coeff_to_goldilocks_ring(wire)?);
     }
     Ok(out)
+}
+
+/// Parse + lift + cross-validate in one call. Returns the LatticeFold R1CS and
+/// the z-vector, asserting (a) both files use the Goldilocks prime, and (b) the
+/// R1CS and witness agree on `n_wires`. Day-4+ callers should prefer this entry
+/// point over the lower-level functions to catch corruption early.
+pub fn load_circom_for_latticefold(
+    r1cs_path: &Path,
+    wtns_path: &Path,
+) -> Result<(R1CS<GoldilocksRingNTT>, Vec<GoldilocksRingNTT>)> {
+    let r1cs_circom = parse_circom_r1cs(r1cs_path)
+        .with_context(|| format!("parsing R1CS at {}", r1cs_path.display()))?;
+    let wtns_circom = parse_circom_wtns(wtns_path)
+        .with_context(|| format!("parsing witness at {}", wtns_path.display()))?;
+    if r1cs_circom.n_wires != wtns_circom.n_wires {
+        bail!(
+            "wire-count mismatch: r1cs has {} wires, wtns has {} (file pair was generated against different circuits)",
+            r1cs_circom.n_wires,
+            wtns_circom.n_wires
+        );
+    }
+    let r1cs = circom_r1cs_to_latticefold(&r1cs_circom)?;
+    let z = circom_witness_to_latticefold(&wtns_circom)?;
+    Ok((r1cs, z))
+}
+
+// ----- Tests -----
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn coeff_to_goldilocks_ring_rejects_wrong_width() {
+        let err = coeff_to_goldilocks_ring(&[0u8; 4]).unwrap_err();
+        assert!(err.to_string().contains("8-byte"));
+    }
+
+    #[test]
+    fn coeff_to_goldilocks_ring_accepts_zero() {
+        let ring = coeff_to_goldilocks_ring(&[0u8; 8]).unwrap();
+        assert!(ring.is_zero());
+    }
+
+    #[test]
+    fn coeff_to_goldilocks_ring_accepts_one() {
+        let bytes = 1u64.to_le_bytes();
+        let ring = coeff_to_goldilocks_ring(&bytes).unwrap();
+        // `1` lifts to the multiplicative identity of the ring (all NTT components = 1).
+        assert!(!ring.is_zero());
+    }
+
+    #[test]
+    fn coeff_to_goldilocks_ring_accepts_p_minus_one() {
+        // Goldilocks p = 2^64 - 2^32 + 1; p-1 = 0xFFFFFFFF00000000.
+        let p_minus_one: u64 = 0xFFFF_FFFF_0000_0000;
+        let bytes = p_minus_one.to_le_bytes();
+        let _ring = coeff_to_goldilocks_ring(&bytes).unwrap();
+        // Just exercise the boundary value (canonical Goldilocks max).
+    }
 }
