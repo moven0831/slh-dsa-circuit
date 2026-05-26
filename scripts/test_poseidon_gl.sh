@@ -24,7 +24,7 @@ circom "$REPO_ROOT/circuits/poseidon_gl/poseidon_gl_smoke.circom" \
     -l "$REPO_ROOT/circuits/poseidon_gl" \
     2>&1 | tee "$BUILD_DIR/compile.log"
 
-ACTUAL_R1CS=$(awk '/non-linear constraints/ {print $NF}' "$BUILD_DIR/compile.log" | tr -d '\r')
+ACTUAL_R1CS=$(awk '/non-linear constraints/ {print $NF; exit}' "$BUILD_DIR/compile.log" | tr -d '\r')
 if [ "$ACTUAL_R1CS" != "$EXPECTED_R1CS" ]; then
     echo "FAIL: R1CS count = $ACTUAL_R1CS, expected $EXPECTED_R1CS"
     exit 1
@@ -55,3 +55,23 @@ else
     echo "RESULT: one or more vectors mismatched."
     exit 1
 fi
+
+# --- Negative-test probe: assert that a corrupted witness DOES fail. ---
+# This guards against a future refactor of check_poseidon_gl.py silently inverting
+# the comparator, or against the test harness becoming a no-op.
+echo
+echo "=== Negative-test probe (tampered witness must produce FAIL) ==="
+ZEROS_JSON="$BUILD_DIR/wtns_zeros.json"
+TAMPER_JSON="$BUILD_DIR/wtns_zeros_tampered.json"
+python3 -c "
+import json, sys
+w = json.load(open('$ZEROS_JSON'))
+# Flip one bit of lane 0 of the public output (witness slot 1) to simulate a bug.
+w[1] = str(int(w[1]) ^ 1)
+json.dump(w, open('$TAMPER_JSON', 'w'))
+"
+if python3 "$REPO_ROOT/scripts/check_poseidon_gl.py" check zeros "$TAMPER_JSON" 2>/dev/null; then
+    echo "FAIL: harness accepted a tampered witness (soundness bug in test infra!)"
+    exit 1
+fi
+echo "PASS: harness correctly rejected tampered witness."

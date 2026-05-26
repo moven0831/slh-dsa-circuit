@@ -1,6 +1,7 @@
 # Pinned Dependencies
 
-All hashes verified by GitHub API on 2026-05-06.
+Core verifier hashes verified by GitHub API on 2026-05-06.
+Folding-track dependencies (rows 8+) verified on 2026-05-26.
 
 | # | Package                       | Pin                                           | Source                                                       |
 |---|-------------------------------|-----------------------------------------------|--------------------------------------------------------------|
@@ -11,6 +12,12 @@ All hashes verified by GitHub API on 2026-05-06.
 | 5 | iden3/snarkjs (npm)           | `0.7.6` (2026-01-26)                          | yarn `resolutions` field in package.json                    |
 | 6 | circomkit (npm)               | `^0.3.4`                                      | `yarn add circomkit`                                        |
 | 7 | yarn berry                    | `4.13.0`                                      | `packageManager` field in package.json (corepack-managed)   |
+| 8 | 0xPolygonZero/plonky2 (git)   | release tag `v1.1.0` (2025-05-12)             | Source of Goldilocks Poseidon round constants + MDS + reference test vectors. Extracted via `tools/gen_poseidon_gl_constants/generate.py` from `plonky2/src/hash/{poseidon,poseidon_goldilocks}.rs` (Apache-2.0) |
+| 9 | NethermindEth/latticefold (git) | main `15cc045c18ea92a50c23528d1e7b62dd392b8c42` (2026-05-26) | Day-3+ folding prover (Apache-2.0). Consumed by `tools/r1cs-latticefold/` (to be added Day 3) |
+|10 | NethermindEth/stark-rings (git) | main `a907aab35dd7afe105b30588eaf74008dea2f12b` (2026-05-26) | Cyclotomic-ring backend for LatticeFold (Apache-2.0; transitive dep) |
+|11 | LFDT-Nightstream/Nightstream (git) | main `755c1595f3b34b5c2bc9eaa50417cdf9dfb871ec` (2026-05-26) | Day-5 measurement-spike against Neo folding scheme (Apache-2.0) |
+
+Folding-track context: see `research/folding/week2_prereqs.md` for toolchain pins (Rust nightly-2025-03-06 for LatticeFold; Rust 1.88+ for Nightstream), Plonky2 vendoring recipe, and Day-0 open items.
 
 ## Prime field
 
