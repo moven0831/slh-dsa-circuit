@@ -1,0 +1,6 @@
+[toolchain]
+# LFDT-Nightstream/Nightstream pins rust-version = "1.88" in its Cargo.toml.
+# Use stable 1.95+ (already installed) — separate from tools/r1cs-latticefold's
+# nightly pin so each crate's MSRV is satisfied independently.
+channel = "stable"
+components = ["rustfmt", "clippy"]

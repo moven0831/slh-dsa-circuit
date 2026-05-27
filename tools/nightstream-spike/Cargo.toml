@@ -1,0 +1,33 @@
+[package]
+name = "nightstream-spike"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Day-5 measurement-spike: feed Circom R1CS into Nightstream's r1cs_to_ccs + (if tractable) prove_direct_ccs."
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "ns_smoke"
+path = "src/bin/ns_smoke.rs"
+
+[dependencies]
+# Standalone from r1cs-latticefold — different Rust toolchain (stable, not nightly).
+# Pinned per research/folding/week2_prereqs.md §1.
+neo-ccs    = { git = "https://github.com/LFDT-Nightstream/Nightstream", rev = "755c1595f3b34b5c2bc9eaa50417cdf9dfb871ec" }
+neo-math   = { git = "https://github.com/LFDT-Nightstream/Nightstream", rev = "755c1595f3b34b5c2bc9eaa50417cdf9dfb871ec" }
+
+# We re-use the Circom .r1cs / .wtns parsers from tools/r1cs-latticefold — but those
+# pull in LatticeFold via the lib. To avoid a transitive LatticeFold build (which
+# requires nightly), this crate hand-rolls a thin re-implementation of just the
+# parser parts. See src/parser.rs.
+
+anyhow = "1"
+clap   = { version = "4", features = ["derive"] }
+log    = "0.4"
+env_logger = "0.10"
+# Pinned to match neo-ccs's locked p3-field version (=0.5.1). If you bump
+# the Nightstream pin in §1 above, re-check via `cargo tree | grep p3-field`.
+p3-field = { version = "=0.5.1", default-features = false }
+
+[profile.release]
+debug = true
