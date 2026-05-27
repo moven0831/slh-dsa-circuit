@@ -14,7 +14,7 @@
 - ✓ **D4 step circuit (HtLayerStep) measures at 485,930 R1CS** on Goldilocks (commit `79d5b8a`), a **0.85× bloat factor** vs the secq256r1 baseline — **Gate-2 PASS, well under the 1.5× threshold**. The Goldilocks 30-round permutation more than offsets the signal-width doubling.
 - ✓ **R1CS importer for Nethermind LatticeFold** lands clean (`51cb6ec`). End-to-end pipeline: Circom `.r1cs` + `.wtns` → parse → lift Goldilocks scalars to degree-0 `RqNTT` ring elements → `CCS::from_r1cs` → `check_relation` PASSes. On the **full 486K-constraint HtLayerStep this completes in ~5 s wall-clock** (commit `b985c08`) — **the largest circuit ever validated through Nethermind LatticeFold**.
 - △ **Full LatticeFold prove-verify pipeline blocks at verify** (commits `b8b5dda`, `f62cc49`). `NIFSProver::prove` succeeds (133 KB proof in 254 ms on the smoke circuit) but `NIFSVerifier::verify` fails at linearization sumcheck. After review, the root cause is *not* the degree-2 vs degree-3 CCS hypothesis the first commit body proposed — that was refuted by reading LatticeFold's own unit tests, which use `from_r1cs_padded` (d=2) and verify cleanly. The working hypothesis is **gadget-decomposition norm mismatch**: our Circom witnesses have full-range Goldilocks coefficients (≤ 2⁶⁴), and `Witness::from_w_ccs`'s gadget decomposition (B=2¹⁵, L=5) produces MLE evaluations that diverge between prover and verifier reconstruction. Resolving this needs Week-3 single-file investigation.
-- ✓ **Nightstream measurement-spike PASSES at full 486K-constraint scale** (commit `edb604f`). Same Circom R1CS → `neo_ccs::sparse_r1cs_to_ccs` → `check_ccs_rowwise_zero` returns Ok in **20 ms** (LatticeFold's `check_relation` is 702 ms on the same circuit — **Nightstream is ~35× faster** at this level, and ~58× faster on the smoke circuit). No verify-side blocker exposed at this stage.
+- ✓ **Nightstream measurement-spike PASSES at full 486K-constraint scale (relation check only)** (commit `edb604f`). Same Circom R1CS → `neo_ccs::sparse_r1cs_to_ccs` → `check_ccs_rowwise_zero` returns Ok in **20 ms** (LatticeFold's `check_relation` is 702 ms on the same circuit — **Nightstream is ~33× faster** at this level; on the smoke circuit the ratio is also ~33×, reproduced by an independent reviewer). **Caveat: Nightstream's full prove-verify cycle was not exercised this week** — the speedup measurement applies to the *relation-check* layer only, not to the NIFS prove path that surfaced the LatticeFold verify failure. Same-shape blocker can't yet be ruled out for Nightstream.
 - ⊘ **Full 7-step IVC + closing SNARK not attempted.** The Week-2 plan deferred the closing SNARK to Week 3, and the IVC loop depends on a working single fold step. Per the audit doc §6b, this is the Week-3 follow-on.
 
 **Week-3 recommendation: pivot the primary fold-target from LatticeFold to Nightstream / Neo.** Rationale in §9.
@@ -114,12 +114,20 @@ Source: `tools/nightstream-spike/`. Same Circom parser shape, different Rust too
 |---|---|---:|---:|---:|
 | reduce2 (440 R1CS) | parse | 5 ms | 11 ms | 2.2× |
 | reduce2 | lift to sparse CCS | 0.2 ms | 0.2 ms (lift) | 1.0× |
-| reduce2 | relation check | **26 µs** | 1.5 ms | **58×** |
+| reduce2 | relation check (Nightstream `check_ccs_rowwise_zero` vs LatticeFold `CCS::check_relation`) | **26 µs** | 920 µs | **~35×** |
 | **HT-layer (486K R1CS)** | parse | 3.7 s | 3.6 s | 1.0× (file-IO bound) |
-| HT-layer | lift to sparse CCS | **200 ms** | 93 ms (different lift target) | — |
-| **HT-layer** | **relation check** | **20 ms** | **702 ms** | **35×** |
+| HT-layer | lift to sparse CCS | **170 ms** (median, range 158–170) | 92 ms (different lift target) | — (apples-to-oranges) |
+| **HT-layer** | **relation check** (CCS vs CCS) | **21 ms** | **700 ms** | **~33×** |
 
-**Nightstream's relation check is 1-2 orders of magnitude faster than LatticeFold's** on identical R1CS. The underlying reason: Plonky3 native Goldilocks arithmetic vs LatticeFold's cyclotomic Rq ring operations. The Day-1 audit doc §4 anticipated this — Goldilocks 64-bit multiplications are ~20-50× faster per-mult than ring operations over Rq — and the measurement confirms it.
+Numbers above reflect the Day-5 independent reproduction by a review agent (median of 3 runs each, fresh build). The "~33× / ~35×" range converges across both circuit scales (smoke and HT-layer); an earlier "~58× on smoke" figure in this memo's first draft was traced to a stale LatticeFold R1CS-check baseline of 1.5 ms — actual median is ~720 µs, giving the ~35× number reproduced here.
+
+**Nightstream's relation check is ~33× faster than LatticeFold's** on identical R1CS, across both circuit scales (smoke and HT-layer). The underlying reason: Plonky3 native Goldilocks arithmetic vs LatticeFold's cyclotomic Rq ring operations. The Day-1 audit doc §4 anticipated this — Goldilocks 64-bit multiplications are ~20-50× faster per-mult than ring operations over Rq — and the relation-check measurement confirms the lower end of that band.
+
+**Peak RSS** (measured by Day-5 reviewer via `/usr/bin/time -l`):
+- LatticeFold `smoke` on HT-layer: ~1.62 GB
+- Nightstream `ns_smoke --sparse` on HT-layer: ~0.34 GB
+
+Nightstream is also ~5× lighter at this scale. Neither triggered macOS memory pressure on M3/24 GB. Worth flagging if Week-3 grows the circuit by another order of magnitude.
 
 ### What we did NOT do on Nightstream
 
@@ -176,8 +184,10 @@ D4 stands. **The Week-2 R1CS measurement (486K) replaces the projected 287K from
 
 **Make Nightstream / Neo the primary Week-3 target.** Make LatticeFold the fallback / parallel diagnosis track.
 
-**Rationale:**
-1. **Relation-check throughput differs by 1-2 orders of magnitude.** Nightstream is 35× faster at 486K-constraint scale, 58× faster on the smoke. This is the same arithmetic on the same R1CS — Nightstream's Plonky3 Goldilocks beats LatticeFold's cyclotomic Rq decisively at the math level. The Day-1 projection of 20-50× field-op speedup for Goldilocks vs secq256r1 is now empirically validated *between two lattice schemes*.
+**Caveat surfaced by Day-5 review** (and held openly here): we are recommending the pivot based on a 33× relation-check speedup, but the **Nightstream prove path was not exercised this week**. The LatticeFold verify failure was also invisible at the relation-check level — it only surfaced when NIFSProver::prove + NIFSVerifier::verify ran. **A similar protocol-level blocker on Nightstream cannot be ruled out** until Week-3 Day 1 wires `direct_ccs_program_from_sparse_r1cs` + the verifier. The Week-3 Day-1 deliverable below is the forcing condition: if Nightstream's prove path hits an equivalent blocker, escalate immediately back to LatticeFold gadget-norm diagnosis instead of burning further days on Nightstream.
+
+**Rationale for the pivot (subject to the Day-1 forcing condition above):**
+1. **Relation-check throughput differs by ~1.5 orders of magnitude.** Nightstream is ~33× faster at both circuit scales. This is the same arithmetic on the same R1CS — Nightstream's Plonky3 Goldilocks beats LatticeFold's cyclotomic Rq decisively at the math level. The Day-1 projection of 20-50× field-op speedup for Goldilocks vs secq256r1 is now empirically validated *between two lattice schemes*.
 2. **Nightstream has no Day-4-equivalent verify-side blocker exposed yet.** The relation check passes cleanly; whether `start_direct_ccs_proof_state` + the full prove/verify cycle hits a similar issue is a Week-3 measurement we have not yet taken, but the early signal is favorable.
 3. **Build + dependency ergonomics favor Nightstream.** Stable Rust, no nightly pin churn, no diamond-dep workarounds, 22-second clean build of the whole crate stack vs LatticeFold's longer transitive build.
 4. **The Week-2 R1CS importer code carries over almost verbatim.** Our parser (`tools/r1cs-latticefold/src/lib.rs:parse_circom_r1cs` / `parse_circom_wtns`) is reused in `tools/nightstream-spike/src/parser.rs`. The only adapter-layer difference is `Goldilocks → GoldilocksRingNTT` (LatticeFold) vs `Goldilocks → neo_math::F` (Nightstream).
@@ -186,7 +196,7 @@ D4 stands. **The Week-2 R1CS measurement (486K) replaces the projected 287K from
 
 | Week-3 day | Work | Deliverable |
 |---|---|---|
-| 1 | Wire `direct_ccs_program_from_sparse_r1cs` + `start_direct_ccs_proof_state` for the smoke circuit. | "Nightstream NIFS prove + verify succeed" or a concrete failure mode. |
+| 1 | Wire `direct_ccs_program_from_sparse_r1cs` + `start_direct_ccs_proof_state` for the smoke circuit. **Forcing condition:** if verify fails analogously to LatticeFold Day-4, escalate to LatticeFold gadget-norm diagnosis as primary instead. | "Nightstream NIFS prove + verify succeed" OR a concrete failure mode that triggers the pivot-back-to-LatticeFold escalation. |
 | 2 | Scale to bench_ht_layer_gl. | Per-fold timing, peak RSS, proof size. |
 | 3 | Drive 7-step IVC loop (or document blocker). | Total fold time + RSS for full D4. |
 | 4 | **Parallel:** continue LatticeFold gadget-norm diagnosis (1 engineer-day per Day-4 estimate). | Either resolution path or "LatticeFold not viable for Goldilocks R1CS, ship on Nightstream." |
@@ -226,9 +236,24 @@ bash scripts/vendor.sh
 
 # Days 1-2 — Goldilocks Poseidon + bench measurements
 yarn test:poseidon_gl          # 4 Plonky2 reference vectors PASS
-yarn test:slh_gl               # SlhF_Gl(all-zeros) consistency probe PASS
+yarn test:slh_gl               # SlhF (Goldilocks) all-zeros consistency probe PASS
 bash scripts/bench_poseidon_gl.sh
-                               # Generates the §2 bloat-factor table
+                               # Generates the §2 bloat-factor table + compiles
+                               # bench_poseidon_gl_reduce2 / bench_slh_*_gl /
+                               # bench_ht_layer_gl with --r1cs + --wasm.
+
+# Generate witnesses for the LatticeFold + Nightstream pipelines.
+# (bench_poseidon_gl.sh produces .r1cs + .wasm but not .wtns; the WASM
+# witness calculators must be invoked once per bench.)
+for c in bench_poseidon_gl_reduce2 bench_ht_layer_gl; do
+  python3 -c "
+import json, sys, os
+# All-zero input for any circuit with only numeric signal inputs.
+# (Manually hand-edit for circuits with array-typed inputs like ht_layer.)
+"  > /dev/null
+done
+# Concretely, see scripts/check_slh_gl_consistency.sh for the input-JSON
+# generation pattern; reuse it for each bench by adjusting the signal map.
 
 # Days 3-4 — LatticeFold pipeline
 cd tools/r1cs-latticefold && cargo build --release && cd -
@@ -237,15 +262,20 @@ cd tools/r1cs-latticefold && cargo build --release && cd -
   --wtns build/poseidon_gl_bench/bench_poseidon_gl_reduce2/all_zeros.wtns
                                # Smoke + 486K scale per §3
 ./tools/r1cs-latticefold/target/release/fold_step \
-  --r1cs ... --wtns ...        # prove SUCCEEDS / verify FAILS per §4
+  --r1cs build/poseidon_gl_bench/bench_poseidon_gl_reduce2/bench_poseidon_gl_reduce2.r1cs \
+  --wtns build/poseidon_gl_bench/bench_poseidon_gl_reduce2/all_zeros.wtns
+                               # prove SUCCEEDS / verify FAILS per §4
 
 # Day 5 — Nightstream spike
 cd tools/nightstream-spike && cargo build --release && cd -
 ./tools/nightstream-spike/target/release/ns_smoke --sparse \
   --r1cs build/poseidon_gl_bench/bench_ht_layer_gl/bench_ht_layer_gl.r1cs \
   --wtns build/poseidon_gl_bench/bench_ht_layer_gl/all_zeros.wtns
-                               # 486K-constraint Nightstream check passes in 20 ms
+                               # 486K-constraint Nightstream relation check
+                               # passes in ~21 ms (median of 3 runs on M3)
 ```
+
+Note on naming: `circuits/poseidon_gl/hashes_gl.circom` exposes the SLH primitives as `SlhF`, `SlhH`, `SlhTk`, `SlhTlen` (unsuffixed), following the family-agnostic include convention in `circuits/common/wots.circom`. They are referred to as "SlhF (Goldilocks)" etc. in this memo when the distinction from the secq256r1 family matters.
 
 ---
 

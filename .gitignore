@@ -33,3 +33,7 @@ kat/inputs/
 .idea/
 .vscode/
 *.swp
+
+# Claude
+Claude.md
+__pycache__/

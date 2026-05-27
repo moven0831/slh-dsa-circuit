@@ -2,27 +2,41 @@
 //! R1CS + witness, using LatticeFold's example default decomposition parameters
 //! (Goldilocks: B=2^15, L=5, B_SMALL=2, K=15, KAPPA=4).
 //!
-//! Day-4 finding (commit b985c08+):
-//!   Prove SUCCEEDS — generates a 133 KB proof in ~219 ms on bench_poseidon_gl_reduce2
+//! Day-4 finding (revised after review):
+//!   Prove SUCCEEDS — generates a 133 KB proof in ~254 ms on bench_poseidon_gl_reduce2
 //!   (440 constraints, post-pad m=4096, ajtai_n=2210). Ajtai + Witness::from_w_ccs +
 //!   LFLinearizationProver + NIFSProver::prove all complete cleanly.
 //!
-//!   Verify FAILS — `linearization sum-check sum mismatch`. Root cause: `CCS::from_r1cs`
-//!   produces a degree-2 CCS (`t=3, q=2, d=2`, S=[[0,1],[2]]), but LatticeFold's NIFS
-//!   protocol expects the degree-3 form (`d=3, q=3`) used by
-//!   `get_test_dummy_degree_three_ccs_non_scalar`. Upstream `examples/e2e.rs`
-//!   verifies in 39 ms with its degree-3 CCS; the verifier's reconstruction of the
-//!   linearization sum is well-defined only for d=3+. The R1CS-derived d=2 CCS is
-//!   structurally correct for `check_relation` (matrix relation holds) but the NIFS
-//!   sumcheck protocol's expected-sum formula doesn't reduce correctly through it.
+//!   Verify FAILS — `linearization sum-check sum mismatch`.
+//!
+//! Two hypotheses tested, both REJECTED:
+//!   - "d=2 vs d=3 CCS shape" — REJECTED. LatticeFold's own unit tests use
+//!     `from_r1cs_padded` (producing d=2, S=[[0,1],[2]]) and verify cleanly.
+//!     The verifier reads ccs.d + 1 dynamically and iterates ccs.S[i] generically.
+//!   - "mismatched wit_acc in setup linearization" — REJECTED. Replacing the
+//!     random rand_w_ccs with the real w_ccs produced the same error pattern;
+//!     only the expected-sum value changes.
+//!
+//! Working hypothesis (Week-3 to settle):
+//!   **Gadget-decomposition norm mismatch.** Circom witnesses contain
+//!   full-range Goldilocks coefficients (~2^64). `Witness::from_w_ccs` calls
+//!   gadget_decompose(B=2^15, L=5) — well-defined coefficient-wise since
+//!   B^L > 2^64, but the resulting MLE evaluations in the linearization
+//!   sumcheck diverge between prover (computed on decomposed f_coeff) and
+//!   verifier (reconstructed from the Ajtai commitment). Needs single-file
+//!   investigation in `linearization.rs`.
 //!
 //! Resolution paths (Week-3+):
-//!   1. Wrap our degree-2 CCS in a degree-3 form by lifting (A·z) * (B·z) = (C·z)
-//!      as ((A·z) * (B·z)) * 1 = (C·z) * 1 — adds redundant degree, may or may not
-//!      satisfy NIFS's structural assumptions.
-//!   2. Use LatticeFold+ (NethermindEth/latticefold WIP) — may natively handle d=2.
-//!   3. Switch to a folding scheme that supports R1CS directly (Neo/SuperNeo via
-//!      Nightstream — the Day-5 measurement-spike target).
+//!   1. Diagnose the witness-encoding mismatch (read linearization.rs prover +
+//!      verifier sumcheck; ~1 engineer-day, plus open-ended budget if the
+//!      norm hypothesis is also wrong).
+//!   2. Use LatticeFold+ (NethermindEth/latticefold WIP) — may natively handle
+//!      this witness model.
+//!   3. Pivot to Nightstream/Neo (Day-5 spike showed 33× faster relation-check
+//!      on the same R1CS; prove path not yet exercised, similar effort to wire).
+//!
+//! See research/folding/week2_results.md §4 + poseidon_gl_audit.md §6b for the
+//! full writeup.
 
 use anyhow::{Context, Result};
 use ark_serialize::{CanonicalSerialize, Compress};
