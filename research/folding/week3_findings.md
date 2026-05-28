@@ -147,6 +147,25 @@ If the goal is "competitive wall-clock prove time on SLH-DSA-128s," Pivot A's an
 
 A combination of B + C is the realistic delivery for "real folding numbers competitive with the monolithic baseline." A produces real numbers but in the wrong direction.
 
+### Follow-up — API surface for closing the r1cs_f_prime chain (Session 2026-05-28)
+
+While scoping a Spartan2-GL closing-SNARK wrapper for `r1cs_f_prime`, found
+that Nightstream `755c1595` ships `finish_*_with_spartan` **only** for the
+`direct_ccs` and `rv32im` frontends (`crates/neo-fold-prototype/src/lifecycle/direct_ccs.rs:191`
+and the rv32im public-proof flow). For `r1cs_f_prime`, the canonical close
+is `neo_fold_clean::lifecycle::compress(prep, audit) → Compressed` via the
+audit-mode flow (`chain.finish_with_audit()`), with `verify(prep, &Compressed)`
+on the verifier side. A true Spartan2-GL final SNARK on the r1cs_f_prime
+output requires custom plumbing: `lifecycle::build_decider_statement(prep,
+&audit) → decider::Statement`, then driving
+`spartan2::R1CSSNARK<GoldilocksP3MerkleMleEngine>` standalone (the
+production-validated `setup → prep_prove → prove → verify` path with
+`is_small = true`). The `Compressed`-via-`compress` path is the right
+**Track 1.4** deliverable today; the true Spartan2-GL final SNARK is a
+**Track 1.4-bis** that's worth measuring once Track 2.2 has built the
+standalone Spartan2-GL adapter in the companion repo (since the adapter
+machinery is identical).
+
 ## 8. Updates needed elsewhere
 
 - `cost_model.md §3.3`: per-fold overhead model needs a "witness-norm decomposition factor" term. For Nightstream `r1cs_f_prime` on Goldilocks: multiply `per_step_R1CS` by ~67 (measured row blow-up: limbs/underlying = 29.9M / 467K + 1 = 64). For LatticeFold (post-fix, projected): ~5×.
