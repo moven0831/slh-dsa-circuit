@@ -112,6 +112,48 @@ template PoseidonGlSponge14() {
     out_hi <== p2.state_out[1];
 }
 
+// PoseidonGlHash30(nInputs): two PoseidonGl calls with distinct sub-tags 0/1
+// prepended; concatenate the 16-byte output of the first with the 14 low bytes
+// of the second to get a 30-byte digest. Mirrors `PoseidonHash30(nInputs)` in
+// `circuits/poseidon/poseidon_wrap.circom` (the secq256r1 family).
+//
+// Inputs are nInputs × 2 Goldilocks FEs (lo/hi pairs), so each PoseidonGl
+// permutation absorbs `1 (sub_tag) + 2 × nInputs` FEs. Capped at 12 →
+// `nInputs ≤ 5`. For SlhHMsg, nInputs = 4 (r, pk_seed, pk_root, msg_digest)
+// which packs 9 FEs into width-12. R1CS: 2 × ~472 + 2 unpacks ≈ 1100 R1CS.
+//
+// Domain separation note: the secq256r1 PoseidonHash30 also uses internal
+// sub-tags 0/1 only (no outer HMsg tag). We match that convention here so
+// the structural construction is consistent across hash families.
+template PoseidonGlHash30(nInputs) {
+    assert(nInputs >= 1);
+    assert(1 + 2 * nInputs <= 12);
+    signal input  inputs_lo[nInputs];
+    signal input  inputs_hi[nInputs];
+    signal output out[30];
+
+    component p0 = PoseidonGl(1 + 2 * nInputs);
+    component p1 = PoseidonGl(1 + 2 * nInputs);
+    p0.inputs[0] <== 0;
+    p1.inputs[0] <== 1;
+    for (var i = 0; i < nInputs; i++) {
+        p0.inputs[1 + 2 * i]     <== inputs_lo[i];
+        p0.inputs[1 + 2 * i + 1] <== inputs_hi[i];
+        p1.inputs[1 + 2 * i]     <== inputs_lo[i];
+        p1.inputs[1 + 2 * i + 1] <== inputs_hi[i];
+    }
+
+    component unpack0 = UnpackFe2To16Bytes();
+    component unpack1 = UnpackFe2To16Bytes();
+    unpack0.lo <== p0.out_lo;
+    unpack0.hi <== p0.out_hi;
+    unpack1.lo <== p1.out_lo;
+    unpack1.hi <== p1.out_hi;
+
+    for (var k = 0; k < 16; k++) out[k]      <== unpack0.bytes[k];
+    for (var k = 0; k < 14; k++) out[16 + k] <== unpack1.bytes[k];
+}
+
 // PoseidonGlReduce(N): binary Merkle reduce of N 16-byte values (each as 2 FEs)
 // down to a single 16-byte value (2 FEs). Uses PoseidonGl(4) at each tree node
 // over (left_lo, left_hi, right_lo, right_hi) → 2-FE output.

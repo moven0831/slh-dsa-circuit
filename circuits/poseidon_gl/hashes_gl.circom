@@ -26,10 +26,68 @@ include "poseidon_gl_wrap.circom";
 // wires the verifier pipeline through Goldilocks Poseidon.
 //
 // Domain-separation tags (unchanged from circuits/poseidon/hashes.circom):
-//   F = 0, H = 1, T_k = 2, T_len = 3, H_msg = 4   (H_msg deferred — D4-restricted)
+//   F = 0, H = 1, T_k = 2, T_len = 3, H_msg = via PoseidonGlHash30 internal sub-tags
 //
-// SlhHMsg is intentionally NOT implemented in this file — the Day 2 / D4-restricted
-// fold only requires F/H/Tk/Tlen. HMsg goes inline in the closing SNARK (Week 3+).
+// SlhHMsg — message-digest primitive for the monolithic verifier. Used by
+// `main_poseidon_gl.circom` (Track 2 monolithic Goldilocks baseline); the D4
+// fold step circuit `bench_ht_layer_gl.circom` excludes it per the D4
+// decomposition (HMsg goes inline in the closing path).
+//
+// Structure mirrors the secq256r1 family's `SlhHMsg`:
+//   - Pack r / pk_seed / pk_root into 3 (lo, hi) Goldilocks FE pairs.
+//   - Pack the 1024-byte message into 64 (lo, hi) pairs.
+//   - Merkle-reduce the 64 pairs to one via `PoseidonGlReduce(64)`.
+//   - Feed [r, pk_seed, pk_root, msg_digest] (4 pairs = 8 FEs) into
+//     `PoseidonGlHash30(4)` → 30 bytes.
+//
+// Domain separation: PoseidonGlHash30 uses internal sub-tags 0/1 across its
+// two PoseidonGl calls (no outer HMsg=4 tag — matches the secq256r1
+// convention; the construction itself is unique).
+template SlhHMsg() {
+    signal input  r[16];
+    signal input  pk_seed[16];
+    signal input  pk_root[16];
+    signal input  m[1024];
+    signal output out[30];
+
+    component pack_r       = PackBytes16To2Fe();
+    component pack_pk_seed = PackBytes16To2Fe();
+    component pack_pk_root = PackBytes16To2Fe();
+    for (var b = 0; b < 16; b++) {
+        pack_r.bytes[b]       <== r[b];
+        pack_pk_seed.bytes[b] <== pk_seed[b];
+        pack_pk_root.bytes[b] <== pk_root[b];
+    }
+
+    // Pack m[1024] into 64 × (lo, hi) pairs.
+    component pack_m[64];
+    signal m_lo[64];
+    signal m_hi[64];
+    for (var i = 0; i < 64; i++) {
+        pack_m[i] = PackBytes16To2Fe();
+        for (var b = 0; b < 16; b++) pack_m[i].bytes[b] <== m[i * 16 + b];
+        m_lo[i] <== pack_m[i].lo;
+        m_hi[i] <== pack_m[i].hi;
+    }
+
+    component reduce = PoseidonGlReduce(64);
+    for (var i = 0; i < 64; i++) {
+        reduce.inputs_lo[i] <== m_lo[i];
+        reduce.inputs_hi[i] <== m_hi[i];
+    }
+
+    component p = PoseidonGlHash30(4);
+    p.inputs_lo[0] <== pack_r.lo;
+    p.inputs_hi[0] <== pack_r.hi;
+    p.inputs_lo[1] <== pack_pk_seed.lo;
+    p.inputs_hi[1] <== pack_pk_seed.hi;
+    p.inputs_lo[2] <== pack_pk_root.lo;
+    p.inputs_hi[2] <== pack_pk_root.hi;
+    p.inputs_lo[3] <== reduce.out_lo;
+    p.inputs_hi[3] <== reduce.out_hi;
+
+    for (var k = 0; k < 30; k++) out[k] <== p.out[k];
+}
 
 // SlhF — F primitive, arity-12 (fits in one PoseidonGlPermute):
 //   tag(1) + seed(2) + ADRS(7) + M(2) = 12 FEs.
