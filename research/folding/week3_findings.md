@@ -106,6 +106,8 @@ The previous draft of this memo claimed: *"production-params `r1cs_f_prime` at S
 
 What's still unverified: the **full 7-step D4 IVC chain** with properly-sized accumulator (`c_data_entries = κ × D = 972` instead of the minimal 2). Naive extrapolation: ~815 s prove. Real number requires running the full chain.
 
+**Update (2026-05-28): real-witness fold confirmed for one step.** With the Rust signer's `emit-layers` (slh-dsa-neo), a real SLH-DSA-128s signature decomposes into 7 `bench_ht_layer_gl` step witnesses that each chain to `pk_root` in the per-layer circuit. Layer 0 was folded through `r1cs_f_prime` (`rfp_smoke_full --n-steps 1`): R1CS-sat ✓, preprocess 90.6 s, prove+finish 139.2 s, verify_uncompressed 28.9 s — **PASS**. So the folded path is no longer all-zeros-only; the single-step cost is real-witness-measured (≈ the synthetic run, within load variance). The remaining gap is the *7-step* chain on the real per-layer witnesses (plumbing + a ~13-min run, no new research risk) and the closing SNARK (blocked upstream).
+
 ## 5. V3 — Goldilocks per-row speedup, measured vs. analytic
 
 **Previous analytic estimate:** Spartan2-GL per-row cost ~0.2–0.8 µs (5–20× speedup vs the companion's 4 µs/row on Spartan2-secq256r1). Extrapolation: 30 M Goldilocks rows × 0.5 µs/row ≈ 15 s of Spartan2-prove-equivalent work per fold step.
