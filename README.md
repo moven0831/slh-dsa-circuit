@@ -112,7 +112,7 @@ yarn verify:folding            # validate research/folding/ numbers against meas
   Spartan2 / OpenAC end-to-end prove + verify numbers for the Poseidon
   verifier; companion repo at
   [moven0831/slh-dsa-128s-poseidon-bench](https://github.com/moven0831/slh-dsa-128s-poseidon-bench).
-- [`research/folding/`](research/folding/) — the Week 1–3 lattice-folding
+- [`research/folding/`](research/folding/) — the lattice-folding
   feasibility study toward client-side proving on mobile. Start with
   [`EXEC_SUMMARY.md`](research/folding/EXEC_SUMMARY.md); deep dives in
   [`step_function_slh_dsa_128s.md`](research/folding/step_function_slh_dsa_128s.md),

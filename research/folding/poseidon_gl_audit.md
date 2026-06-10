@@ -45,7 +45,7 @@ So the round-count drop (73 → 30) more than compensates for the wider state (t
 
 ## 3. Gate-2 decision
 
-Per `/Users/moventsai/.claude/plans/given-the-context-on-reactive-patterson.md` §"Gate-2 (end of Day 2)":
+Per the Gate-2 (end of Day 2) sign-off criteria:
 
 - **Bloat factor ≤ 1.5×** → proceed with full D4 plan (7-step IVC on LatticeFold). ✓ HT-layer factor is 0.85×, all individual primitives ≤ 1.52×.
 

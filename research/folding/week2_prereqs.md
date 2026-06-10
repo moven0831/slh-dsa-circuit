@@ -1,6 +1,6 @@
 # Week 2 prerequisites — pinned dependencies, toolchains, environment
 
-**Status:** Week 2 Day 0 deliverable (Task 0.2 from `/Users/moventsai/.claude/plans/given-the-context-on-reactive-patterson.md`).
+**Status:** Week 2 Day 0 deliverable.
 **Audience:** any engineer (or agent) picking up Week 2 execution.
 
 This file pins every external dependency the Week 2 plan consumes — upstream commit SHAs, toolchain versions, license terms. Re-pin only when a new commit ships a feature we need or fixes a blocker we hit.
@@ -99,5 +99,4 @@ These come from `scheme_selection.md §6`. **Owners and trigger dates need fill-
 - Smoke wrapper: `circuits/poseidon_gl/poseidon_gl_smoke.circom`
 - Test runner: `scripts/test_poseidon_gl.sh`
 - Validator: `scripts/check_poseidon_gl.py`
-- Plan: `/Users/moventsai/.claude/plans/given-the-context-on-reactive-patterson.md`
 - Week 1 sign-off blockers: `research/folding/scheme_selection.md §6`

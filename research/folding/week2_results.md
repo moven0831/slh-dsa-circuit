@@ -1,7 +1,6 @@
 # Week 2 results — D4 folding prototype on Nethermind LatticeFold + Nightstream measurement-spike
 
-**Status:** Week 2 Day 5 deliverable. Closes the work tracked in
-`/Users/moventsai/.claude/plans/given-the-context-on-reactive-patterson.md`.
+**Status:** Week 2 Day 5 deliverable. Closes the Week 2 prototype work.
 **Audience:** the project lead reading the Week-3 / Week-4 commitment decision.
 
 ---

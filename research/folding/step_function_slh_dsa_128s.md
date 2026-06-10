@@ -4,8 +4,6 @@
 
 **Scope:** SLH-DSA-128s only, Poseidon variant. Scheme-agnostic — covers both flat-IVC and multi-fold (Neo/SuperNeo-style hierarchical) decompositions. Cost columns for both `secq256r1` (measured) and Goldilocks (projected, ±25%).
 
-**Companion plan:** the plan that produced this doc lives at `/Users/moventsai/.claude/plans/plan-for-the-step-function-purring-porcupine.md` (harness path) and may be archived to `research/folding/_plans/`.
-
 ---
 
 ## 1. Summary
