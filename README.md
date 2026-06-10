@@ -14,6 +14,13 @@ Deliverable: **R1CS stats** (per-component constraint counts, witness sizes,
 totals) + 20/20 per-primitive correctness tests against a Rust FIPS 205 oracle.
 **No trusted setup, no proof generation, no Solidity verifier.**
 
+> **This repo measures circuit *complexity*, not proving performance.** End-to-end
+> prove/verify timings (16.2 s / 9.5 s / 5.41 GB below) are produced in the companion
+> prover repos, not here:
+> [`slh-dsa-128s-poseidon-bench`](https://github.com/moven0831/slh-dsa-128s-poseidon-bench)
+> (monolithic Spartan2) and [`slh-dsa-neo`](https://github.com/moven0831/slh-dsa-neo)
+> (Nightstream/Neo folding).
+
 ## TLDR
 
 | Family   | F | H | T_k | T_len | H_msg | **Verifier total** | Compile |
@@ -64,6 +71,20 @@ Spartan2 backend that OpenAC's `wallet-unit-poc/ecdsa-spartan2` uses
 Reproducer + Rust crate: [moven0831/slh-dsa-128s-poseidon-bench](https://github.com/moven0831/slh-dsa-128s-poseidon-bench).
 Full breakdown in [`results/slh_dsa_spartan2_1k.md`](results/slh_dsa_spartan2_1k.md).
 
+## Folding research — conclusion (negative result)
+
+We asked whether **folding** (Nova/Neo/LatticeFold) could cut the monolithic prover's 5.41 GB peak
+for mobile client-side proving. After measuring it end-to-end: **no, not at this scale.** Nightstream
+`r1cs_f_prime` on the D4 Goldilocks step is **~50× slower** in prover wall-clock than monolithic
+Spartan2 (~815 s projected full-chain vs 16.2 s) and uses ~2× the memory per step. Root cause is
+structural: Poseidon emits full-range 64-bit witnesses, but post-quantum lattice folding can only
+commit to bit-sized values, forcing a **64× bit-decomposition blow-up** per wire.
+
+The real feasibility win turned out to be a **PCS swap (Hyrax → Hash-MLE) in the *monolithic*
+prover**, not folding. Details: [`research/folding/week3_findings.md`](research/folding/week3_findings.md);
+prover measurements in [`slh-dsa-128s-poseidon-bench`](https://github.com/moven0831/slh-dsa-128s-poseidon-bench)
+and the folding prototype in [`slh-dsa-neo`](https://github.com/moven0831/slh-dsa-neo).
+
 ## Quickstart
 
 ```bash
@@ -91,13 +112,15 @@ yarn verify:folding            # validate research/folding/ numbers against meas
   Spartan2 / OpenAC end-to-end prove + verify numbers for the Poseidon
   verifier; companion repo at
   [moven0831/slh-dsa-128s-poseidon-bench](https://github.com/moven0831/slh-dsa-128s-poseidon-bench).
-- [`research/folding/`](research/folding/) — Week 1 lattice-folding
-  research: step-function design
-  ([`step_function_slh_dsa_128s.md`](research/folding/step_function_slh_dsa_128s.md)),
-  cost model ([`cost_model.md`](research/folding/cost_model.md)), and
-  scheme selection ([`scheme_selection.md`](research/folding/scheme_selection.md))
-  toward client-side proving on mobile. **Forward-looking — projections, not
-  yet measured; refine in Week 2 prototype.**
+- [`research/folding/`](research/folding/) — the Week 1–3 lattice-folding
+  feasibility study toward client-side proving on mobile. Start with
+  [`EXEC_SUMMARY.md`](research/folding/EXEC_SUMMARY.md); deep dives in
+  [`step_function_slh_dsa_128s.md`](research/folding/step_function_slh_dsa_128s.md),
+  [`cost_model.md`](research/folding/cost_model.md),
+  [`scheme_selection.md`](research/folding/scheme_selection.md); measured results in
+  [`week2_results.md`](research/folding/week2_results.md) and
+  [`week3_findings.md`](research/folding/week3_findings.md).
+  **Concluded — see the callout below.**
 - [`Dependencies.md`](Dependencies.md) — pinned versions and commit hashes.
 
 ## Layout
