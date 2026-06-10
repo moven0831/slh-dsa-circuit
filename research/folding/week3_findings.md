@@ -23,7 +23,7 @@ The smoke binary `rfp_smoke` makes this reproducible in ~30 s of test time (the 
 
 ## 1. What the rfp_smoke binary produced
 
-Phase-A pivot landed at [`github.com/moven0831/slh-dsa-neo`](https://github.com/moven0831/slh-dsa-neo) commit on `main`. The `rfp_smoke` binary (`crates/neo-ivc/src/bin/rfp_smoke.rs`) wires:
+The folding measurement landed at [`github.com/moven0831/slh-dsa-neo`](https://github.com/moven0831/slh-dsa-neo) on `main`. The `rfp_smoke` binary (`crates/neo-ivc/src/bin/rfp_smoke.rs`) wires:
 
 ```
 parse Circom .r1cs/.wtns
@@ -135,23 +135,23 @@ The honest position is now: **folding via `r1cs_f_prime` is ~5× slower per step
 
 The Day-5 measurement spike (`check_ccs_rowwise_zero` at 21 ms on 486 K rows) didn't surface any of this because relation-check does not enforce the norm bound and does not run NIFS prove. The "33× faster than LatticeFold" claim from `week2_results.md §9` is correct for relation-check throughput but does not translate to a 33× advantage in NIFS prove time — which is what actually matters for IVC.
 
-## 7. Pivots — where Pivot A leaves us
+## 7. Where the folding measurement leaves us
 
-The original three pivots in this memo were Pivot A (measure `r1cs_f_prime` at production), Pivot B (drop folding, bench monolithic Spartan2-GL), Pivot C (fix LatticeFold gadget-norm at verify). **Pivot A is now done.** The result:
+The three candidate directions in this memo were: (1) measure `r1cs_f_prime` at production params, (2) drop folding and benchmark the monolithic Spartan2-GL prover, and (3) fix the LatticeFold gadget-norm at verify. **The first — the folding measurement — is now done.** The result:
 
 - Folding via `r1cs_f_prime` works end-to-end at production security on a real Circom-derived Goldilocks R1CS.
 - Wall-clock is meaningfully worse than monolithic Spartan2 on secq256r1: ~5× per step, ~32× for the full D4 chain.
 - Peak RSS per step (10.46 GB) is roughly 2× the monolithic baseline (5.41 GB), but **doesn't compound across folds** — IVC's defining property.
 
-If the goal is "competitive wall-clock prove time on SLH-DSA-128s," Pivot A's answer is: **Nightstream's `r1cs_f_prime` is not the path.** The 64× row blow-up is structural to the scheme on Goldilocks; you can't optimize it away without changing the scheme.
+If the goal is "competitive wall-clock prove time on SLH-DSA-128s," the folding measurement's answer is: **Nightstream's `r1cs_f_prime` is not the path.** The 64× row blow-up is structural to the scheme on Goldilocks; you can't optimize it away without changing the scheme.
 
 **Updated recommendations:**
 
-- **Pivot B (monolithic Spartan2-GL bench, no folding)** — most useful next step. Compares Goldilocks Poseidon Spartan2 prove to the companion's secq256r1 monolith with no folding overhead. Quantifies the small-field benefit cleanly. Reuses the existing Goldilocks Poseidon port. ~3–5 engineer-days. Lowest risk.
-- **Pivot C (LatticeFold gadget-norm fix at verify)** — still worth doing. LatticeFold's 5× decomposition factor is more favorable than Nightstream's 64×. If the verify-side fix lands, `r1cs_f_prime`-style measurement on LatticeFold would give per-step prove around `5 × 116.6 / 64 = ~9 s` if the per-row cost is similar — potentially competitive. ~1 engineer-day for the fix per `poseidon_gl_audit.md` line 144, plus a few days to wire and measure.
-- **Pivot D (new) — accept folding is for streaming/memory-bound prove, not wall-clock**. Folding's defining advantage is per-step RSS rather than total time. For a constrained-memory verifier (mobile, embedded), folding to small SNARK proof + small verify state could matter even if total prover wall-clock is 10–32× worse. But the SLH-DSA-128s deliverable is for prover wall-clock first, so this isn't the primary path.
+- **The monolithic Spartan2-GL benchmark (no folding)** — most useful next step. Compares Goldilocks Poseidon Spartan2 prove to the companion's secq256r1 monolith with no folding overhead. Quantifies the small-field benefit cleanly. Reuses the existing Goldilocks Poseidon port. ~3–5 engineer-days. Lowest risk.
+- **The LatticeFold gadget-norm fix at verify** — still worth doing. LatticeFold's 5× decomposition factor is more favorable than Nightstream's 64×. If the verify-side fix lands, `r1cs_f_prime`-style measurement on LatticeFold would give per-step prove around `5 × 116.6 / 64 = ~9 s` if the per-row cost is similar — potentially competitive. ~1 engineer-day for the fix per `poseidon_gl_audit.md` line 144, plus a few days to wire and measure.
+- **Accepting that folding is for streaming/memory-bound proving, not wall-clock (new framing)** — folding's defining advantage is per-step RSS rather than total time. For a constrained-memory verifier (mobile, embedded), folding to a small SNARK proof + small verify state could matter even if total prover wall-clock is 10–32× worse. But the SLH-DSA-128s deliverable is for prover wall-clock first, so this isn't the primary path.
 
-A combination of B + C is the realistic delivery for "real folding numbers competitive with the monolithic baseline." A produces real numbers but in the wrong direction.
+A combination of the monolithic benchmark + the LatticeFold fix is the realistic delivery for "real folding numbers competitive with the monolithic baseline." The folding measurement produces real numbers, but in the wrong direction.
 
 ### Follow-up — API surface for closing the r1cs_f_prime chain (Session 2026-05-28)
 
@@ -167,10 +167,9 @@ output requires custom plumbing: `lifecycle::build_decider_statement(prep,
 `spartan2::R1CSSNARK<GoldilocksP3MerkleMleEngine>` standalone (the
 production-validated `setup → prep_prove → prove → verify` path with
 `is_small = true`). The `Compressed`-via-`compress` path is the right
-**Track 1.4** deliverable today; the true Spartan2-GL final SNARK is a
-**Track 1.4-bis** that's worth measuring once Track 2.2 has built the
-standalone Spartan2-GL adapter in the companion repo (since the adapter
-machinery is identical).
+deliverable today; the true Spartan2-GL final SNARK is a follow-up worth
+measuring once the standalone Spartan2-GL adapter is built in the companion
+repo (since the adapter machinery is identical).
 
 ## 8. Updates needed elsewhere
 
@@ -189,7 +188,7 @@ machinery is identical).
 - Auto-params: `crates/neo-params/src/lib.rs:236–270` (`goldilocks_auto_r1cs_ccs_with`; line 231 is the no-knob wrapper `goldilocks_auto_r1cs_ccs`)
 - r1cs_f_prime API: `crates/neo-fold-clean/src/frontends/r1cs_f_prime/mod.rs`
 - r1cs_f_prime end-to-end test (uses `tiny_params`): `crates/neo-fold-clean/tests/system/r1cs_compiler.rs` — `tiny_params()` at line 554, `make_tiny_lifecycle_plan` at line 580, `r1cs_compiler_base_and_recursive_share_structure` at line 635
-- LatticeFold gadget-norm hypothesis (Pivot C): `research/folding/poseidon_gl_audit.md` line 140 (§ "Gadget-decomposition norm mismatch") — also `research/folding/week2_results.md §4`
+- LatticeFold gadget-norm hypothesis: `research/folding/poseidon_gl_audit.md` line 140 (§ "Gadget-decomposition norm mismatch") — also `research/folding/week2_results.md §4`
 - Week-2 closure (now superseded for the wall-clock claim): `research/folding/week2_results.md`
 - Original cost model (needs update): `research/folding/cost_model.md §3.3`
 - Companion baseline: `slh-dsa-128s-poseidon-bench/README.md`
